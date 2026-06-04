@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Igor Pshenychnyi — Frontend & Shopify Developer based in Copenhagen. Available for remote work worldwide.">
+<title>Igor Pshenychnyi — Frontend & Shopify Developer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@300;400;500&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --ink: #0f0f0e;
+  --paper: #f4f2ed;
+  --accent: #1a5c3a;
+  --accent-dark: #0f3d26;
+  --accent-light: #d4e8cc;
+  --muted: #797771;
+  --border: #dbd9d3;
+  --card: #ffffff;
+  --mono: 'DM Mono', monospace;
+  --serif: 'Instrument Serif', Georgia, serif;
+  --sans: 'Outfit', sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* ── NAV ── */
+nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 56px;
+  background: rgba(244, 242, 237, 0.9);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  font-weight: 400;
+}
+
+.nav-name span { color: var(--accent); }
+
+.nav-links { display: flex; gap: 36px; align-items: center; }
+.nav-links a {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+  text-decoration: none;
+  letter-spacing: 0.02em;
+  transition: color 0.18s;
+}
+.nav-links a:hover { color: var(--ink); }
+
+.nav-cta {
+  font-family: var(--mono);
+  font-size: 11px !important;
+  color: var(--accent) !important;
+  border: 1px solid var(--accent);
+  padding: 6px 14px;
+  border-radius: 2px;
+  transition: background 0.18s, color 0.18s !important;
+}
+.nav-cta:hover { background: var(--accent) !important; color: #fff !important; }
+
+/* ── HERO ── */
+.hero {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 55% 1fr;
+  align-items: center;
+  padding: 140px 56px 80px;
+  gap: 80px;
+}
+
+.hero-eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 28px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  opacity: 0;
+  animation: fadeUp 0.5s ease forwards 0.15s;
+}
+.hero-eyebrow::before {
+  content: '';
+  display: block;
+  width: 32px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.hero-name {
+  font-family: var(--serif);
+  font-size: clamp(56px, 6.5vw, 96px);
+  line-height: 1.0;
+  letter-spacing: -0.025em;
+  margin-bottom: 28px;
+  opacity: 0;
+  animation: fadeUp 0.6s ease forwards 0.3s;
+}
+
+.hero-name em {
+  font-style: italic;
+  color: var(--accent);
+}
+
+.hero-desc {
+  font-size: 16px;
+  font-weight: 300;
+  color: #4a4845;
+  line-height: 1.8;
+  max-width: 480px;
+  margin-bottom: 44px;
+  opacity: 0;
+  animation: fadeUp 0.6s ease forwards 0.45s;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  opacity: 0;
+  animation: fadeUp 0.6s ease forwards 0.6s;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 26px;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  border-radius: 2px;
+  transition: all 0.2s;
+  letter-spacing: 0.025em;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-dark); transform: translateY(-2px); }
+
+.btn-outline { background: transparent; color: var(--ink); border: 1px solid var(--border); }
+.btn-outline:hover { border-color: var(--ink); }
+
+/* Hero stats panel */
+.hero-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  opacity: 0;
+  animation: fadeIn 0.8s ease forwards 0.75s;
+}
+
+.stat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  padding: 22px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stat-card.dark {
+  background: var(--ink);
+  border-color: var(--ink);
+  border-left-color: var(--accent-light);
+}
+
+.stat-val {
+  font-family: var(--serif);
+  font-size: 36px;
+  color: var(--ink);
+  line-height: 1;
+}
+.stat-card.dark .stat-val { color: var(--paper); }
+
+.stat-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-align: right;
+  max-width: 120px;
+  line-height: 1.4;
+}
+.stat-card.dark .stat-label { color: rgba(244,242,237,0.55); }
+
+.stat-stack {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  padding: 16px 24px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  line-height: 1.7;
+}
+
+/* ── SHARED SECTION ── */
+.section-wrap {
+  padding: 96px 56px;
+}
+
+.label-row {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.label-row::after { content: ''; display: block; width: 36px; height: 1px; background: var(--accent); }
+
+.section-heading {
+  font-family: var(--serif);
+  font-size: clamp(38px, 4vw, 60px);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  margin-bottom: 60px;
+}
+
+/* ── PROJECTS ── */
+.project-list { display: flex; flex-direction: column; gap: 3px; }
+
+.project-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 40px 48px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 40px;
+  align-items: start;
+  transition: border-color 0.2s;
+  position: relative;
+}
+.project-item::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.project-item:hover { border-color: rgba(26,92,58,0.35); }
+.project-item:hover::after { opacity: 1; }
+
+.proj-meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.proj-name {
+  font-family: var(--serif);
+  font-size: 30px;
+  line-height: 1.15;
+  margin-bottom: 14px;
+  letter-spacing: -0.01em;
+}
+
+.proj-desc {
+  font-size: 14px;
+  font-weight: 300;
+  color: var(--muted);
+  line-height: 1.75;
+  max-width: 580px;
+  margin-bottom: 22px;
+}
+
+.proj-tags { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.proj-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  border-radius: 1px;
+}
+
+.proj-tag.highlight {
+  background: var(--accent-light);
+  border-color: rgba(26,92,58,0.3);
+  color: var(--accent-dark);
+  font-weight: 500;
+}
+
+.proj-action { padding-top: 4px; }
+
+.proj-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px; height: 46px;
+  border: 1px solid var(--border);
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 18px;
+  transition: all 0.2s;
+  border-radius: 2px;
+}
+.proj-link:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.proj-no-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px; height: 46px;
+  border: 1px dashed var(--border);
+  color: var(--border);
+  font-size: 18px;
+  border-radius: 2px;
+}
+
+/* ── SKILLS ── */
+.skills-wrap {
+  background: var(--ink);
+  padding: 96px 56px;
+}
+.skills-wrap .label-row { color: var(--accent-light); }
+.skills-wrap .label-row::after { background: var(--accent-light); }
+.skills-wrap .section-heading { color: var(--paper); }
+
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+}
+
+.skill-col {
+  border: 1px solid rgba(255,255,255,0.07);
+  padding: 32px 28px;
+}
+
+.skill-col-head {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent-light);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 24px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.skill-entry {
+  font-size: 14px;
+  font-weight: 300;
+  color: rgba(244,242,237,0.8);
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.skill-entry:last-child { border-bottom: none; }
+
+.skill-dot {
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--accent-light);
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+/* ── ABOUT ── */
+.about-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 96px;
+  align-items: start;
+}
+
+.about-text { font-size: 16px; font-weight: 300; color: #4a4845; line-height: 1.85; }
+.about-text p + p { margin-top: 22px; }
+.about-text strong { font-weight: 500; color: var(--ink); }
+
+.about-facts { display: flex; flex-direction: column; gap: 2px; }
+
+.fact-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+.fact-key {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.fact-val {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.fact-val a { color: var(--accent); text-decoration: none; }
+.fact-val a:hover { text-decoration: underline; }
+
+/* ── CONTACT ── */
+.contact-wrap {
+  background: var(--accent);
+  padding: 100px 56px;
+  text-align: center;
+}
+
+.contact-wrap .label-row {
+  color: rgba(255,255,255,0.55);
+  justify-content: center;
+}
+.contact-wrap .label-row::after { background: rgba(255,255,255,0.35); }
+
+.contact-heading {
+  font-family: var(--serif);
+  font-size: clamp(44px, 5.5vw, 80px);
+  color: #fff;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  margin-bottom: 18px;
+}
+.contact-heading em { font-style: italic; }
+
+.contact-sub {
+  font-size: 15px;
+  font-weight: 300;
+  color: rgba(255,255,255,0.7);
+  margin-bottom: 52px;
+  max-width: 440px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.7;
+}
+
+.contact-row {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.contact-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 22px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.22);
+  border-radius: 2px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 400;
+  text-decoration: none;
+  transition: background 0.18s;
+  letter-spacing: 0.02em;
+  font-family: var(--sans);
+}
+.contact-btn:hover { background: rgba(255,255,255,0.2); }
+
+.contact-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ── FOOTER ── */
+footer {
+  padding: 28px 56px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid var(--border);
+}
+footer p {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+}
+
+/* ── ANIMATIONS ── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.reveal.in { opacity: 1; transform: none; }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 1024px) {
+  .skills-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 860px) {
+  nav { padding: 16px 24px; }
+  .nav-links { gap: 18px; }
+  .nav-links a:not(.nav-cta):not(:last-child) { display: none; }
+  .hero { grid-template-columns: 1fr; padding: 110px 24px 64px; gap: 52px; }
+  .hero-panel { display: none; }
+  .section-wrap, .skills-wrap { padding: 72px 24px; }
+  .project-item { grid-template-columns: 1fr; padding: 28px 24px; gap: 24px; }
+  .about-grid { grid-template-columns: 1fr; gap: 48px; }
+  .contact-wrap { padding: 72px 24px; }
+  footer { flex-direction: column; gap: 10px; padding: 24px; text-align: center; }
+  .skills-grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 520px) {
+  .skills-grid { grid-template-columns: 1fr; }
+  .hero-name { font-size: 52px; }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-name">Igor <span>Pshenychnyi</span></a>
+  <div class="nav-links">
+    <a href="#work">Work</a>
+    <a href="#skills">Skills</a>
+    <a href="#about">About</a>
+    <a href="mailto:iiihhooorr@gmail.com" class="nav-cta">Hire me</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div>
+    <p class="hero-eyebrow">Frontend &amp; Shopify Developer · Copenhagen</p>
+    <h1 class="hero-name">Igor<br><em>Pshenychnyi</em></h1>
+    <p class="hero-desc">
+      I build clean, fast websites for real clients — from first brief to deployed, 
+      live product. Specialising in React, Next.js, and Shopify. Available for remote 
+      freelance work worldwide.
+    </p>
+    <div class="hero-actions">
+      <a href="#work" class="btn btn-primary">View my work ↓</a>
+      <a href="mailto:iiihhooorr@gmail.com" class="btn btn-outline">Get in touch →</a>
+    </div>
+  </div>
+
+  <div class="hero-panel">
+    <div class="stat-card">
+      <span class="stat-val">2</span>
+      <span class="stat-label">Paid client<br>projects</span>
+    </div>
+    <div class="stat-card dark">
+      <span class="stat-val">3+</span>
+      <span class="stat-label">Live sites<br>deployed</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-val">CET</span>
+      <span class="stat-label">Remote · UTC+1</span>
+    </div>
+    <div class="stat-stack">
+      React &nbsp;·&nbsp; Next.js &nbsp;·&nbsp; Shopify<br>
+      Python &nbsp;·&nbsp; Figma &nbsp;·&nbsp; GitHub
+    </div>
+  </div>
+</section>
+
+<!-- PROJECTS -->
+<section id="work" class="section-wrap">
+  <p class="label-row reveal">Selected work</p>
+  <h2 class="section-heading reveal">Projects</h2>
+
+  <div class="project-list">
+
+    <div class="project-item reveal">
+      <div>
+        <p class="proj-meta">01 &nbsp;—&nbsp; 2024 &nbsp;·&nbsp; Paid client</p>
+        <h3 class="proj-name">Healing Space —<br>Physiotherapy Clinic</h3>
+        <p class="proj-desc">
+          Full website designed and built end-to-end for a physiotherapy clinic. 
+          Includes service listings, a booking section, contact form, and a consistent 
+          brand identity throughout. Delivered as a complete paid project — from 
+          first conversation to live deployment.
+        </p>
+        <div class="proj-tags">
+          <span class="proj-tag highlight">Paid client</span>
+          <span class="proj-tag highlight">Live</span>
+          <span class="proj-tag">React</span>
+          <span class="proj-tag">JavaScript</span>
+          <span class="proj-tag">HTML / CSS</span>
+          <span class="proj-tag">Responsive</span>
+        </div>
+      </div>
+      <div class="proj-action">
+        <a href="https://healing-space-85.emergent.host/" target="_blank" rel="noopener" class="proj-link" title="View live site">↗</a>
+      </div>
+    </div>
+
+    <div class="project-item reveal">
+      <div>
+        <p class="proj-meta">02 &nbsp;—&nbsp; 2024 &nbsp;·&nbsp; Paid client</p>
+        <h3 class="proj-name">Restaurant Website</h3>
+        <p class="proj-desc">
+          Multi-section website for a local restaurant. Features a full menu, 
+          photo gallery, and location details. Built mobile-first with a clean 
+          visual hierarchy and fast load performance. Paid client project.
+        </p>
+        <div class="proj-tags">
+          <span class="proj-tag highlight">Paid client</span>
+          <span class="proj-tag">HTML / CSS</span>
+          <span class="proj-tag">JavaScript</span>
+          <span class="proj-tag">Mobile-first</span>
+        </div>
+      </div>
+      <div class="proj-action">
+        <div class="proj-no-link" title="Live link not public">—</div>
+      </div>
+    </div>
+
+    <div class="project-item reveal">
+      <div>
+        <p class="proj-meta">03 &nbsp;—&nbsp; 2025 &nbsp;·&nbsp; Personal project</p>
+        <h3 class="proj-name">Developer Portfolio<br>&amp; Services Site</h3>
+        <p class="proj-desc">
+          Personal site listing services, pricing tiers, and contact options — 
+          used for direct client outreach. Deployed and maintained via Vercel and GitHub.
+        </p>
+        <div class="proj-tags">
+          <span class="proj-tag highlight">Live</span>
+          <span class="proj-tag">HTML / CSS</span>
+          <span class="proj-tag">JavaScript</span>
+          <span class="proj-tag">Vercel</span>
+          <span class="proj-tag">GitHub</span>
+        </div>
+      </div>
+      <div class="proj-action">
+        <a href="https://prise-44ub.vercel.app" target="_blank" rel="noopener" class="proj-link" title="View live site">↗</a>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- SKILLS -->
+<section id="skills" class="skills-wrap">
+  <p class="label-row reveal">What I work with</p>
+  <h2 class="section-heading reveal">Skills</h2>
+
+  <div class="skills-grid">
+    <div class="skill-col reveal">
+      <p class="skill-col-head">Languages</p>
+      <div class="skill-entry"><span class="skill-dot"></span>JavaScript (ES6+)</div>
+      <div class="skill-entry"><span class="skill-dot"></span>Python</div>
+      <div class="skill-entry"><span class="skill-dot"></span>HTML5</div>
+      <div class="skill-entry"><span class="skill-dot"></span>CSS3</div>
+    </div>
+    <div class="skill-col reveal">
+      <p class="skill-col-head">Frameworks</p>
+      <div class="skill-entry"><span class="skill-dot"></span>React</div>
+      <div class="skill-entry"><span class="skill-dot"></span>Next.js</div>
+      <div class="skill-entry"><span class="skill-dot"></span>Tailwind CSS</div>
+    </div>
+    <div class="skill-col reveal">
+      <p class="skill-col-head">Platforms</p>
+      <div class="skill-entry"><span class="skill-dot"></span>Shopify</div>
+      <div class="skill-entry"><span class="skill-dot"></span>Vercel</div>
+      <div class="skill-entry"><span class="skill-dot"></span>GitHub</div>
+      <div class="skill-entry"><span class="skill-dot"></span>Telegram API</div>
+    </div>
+    <div class="skill-col reveal">
+      <p class="skill-col-head">Tools</p>
+      <div class="skill-entry"><span class="skill-dot"></span>Figma</div>
+      <div class="skill-entry"><span class="skill-dot"></span>Claude &amp; ChatGPT</div>
+      <div class="skill-entry"><span class="skill-dot"></span>Git</div>
+      <div class="skill-entry"><span class="skill-dot"></span>VS Code</div>
+    </div>
+  </div>
+</section>
+
+<!-- ABOUT -->
+<section id="about" class="section-wrap">
+  <p class="label-row reveal">Background</p>
+  <h2 class="section-heading reveal">About me</h2>
+
+  <div class="about-grid">
+    <div class="about-text reveal">
+      <p>
+        I'm a 19-year-old web developer based in Copenhagen, delivering paid client 
+        websites since 2024. My work combines <strong>clean code with commercial 
+        thinking</strong> — every project I take on, I treat as if my name is on it. 
+        Because it is.
+      </p>
+      <p>
+        I handle the full project lifecycle independently: scoping, design in Figma, 
+        development, deployment, and handover. I integrate AI tools into my daily 
+        workflow to ship faster without sacrificing quality.
+      </p>
+      <p>
+        Alongside development, I'm studying <strong>International Business &amp; 
+        Corporate Management</strong> at two universities simultaneously — 
+        Niels Brock Business College in Copenhagen and V.&nbsp;N.&nbsp;Karazin 
+        Kharkiv National University. That background shapes how I think about 
+        client needs and project value.
+      </p>
+    </div>
+    <div class="about-facts reveal">
+      <div class="fact-row">
+        <span class="fact-key">Location</span>
+        <span class="fact-val">Copenhagen, Denmark</span>
+      </div>
+      <div class="fact-row">
+        <span class="fact-key">Availability</span>
+        <span class="fact-val">Immediately available</span>
+      </div>
+      <div class="fact-row">
+        <span class="fact-key">Timezone</span>
+        <span class="fact-val">CET (UTC+1)</span>
+      </div>
+      <div class="fact-row">
+        <span class="fact-key">Work type</span>
+        <span class="fact-val">Remote · Freelance · Contract</span>
+      </div>
+      <div class="fact-row">
+        <span class="fact-key">Spoken languages</span>
+        <span class="fact-val">English · Russian · Danish</span>
+      </div>
+      <div class="fact-row">
+        <span class="fact-key">GitHub</span>
+        <span class="fact-val"><a href="https://github.com/iihhorr" target="_blank" rel="noopener">github.com/iihhorr</a></span>
+      </div>
+      <div class="fact-row">
+        <span class="fact-key">LinkedIn</span>
+        <span class="fact-val"><a href="https://www.linkedin.com/in/igor-pshenychnyi/" target="_blank" rel="noopener">igor-pshenychnyi</a></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CONTACT -->
+<div id="contact" class="contact-wrap">
+  <p class="label-row">Ready to work</p>
+  <h2 class="contact-heading">Got a project<br><em>in mind?</em></h2>
+  <p class="contact-sub">
+    Available for remote freelance contracts, part-time roles, and 
+    project-based work. Let's talk.
+  </p>
+  <div class="contact-row">
+    <a href="mailto:iiihhooorr@gmail.com" class="contact-btn">
+      <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 7 10-7"/></svg>
+      iiihhooorr@gmail.com
+    </a>
+    <a href="https://github.com/iihhorr" target="_blank" rel="noopener" class="contact-btn">
+      <svg viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+      github.com/iihhorr
+    </a>
+    <a href="https://www.linkedin.com/in/igor-pshenychnyi/" target="_blank" rel="noopener" class="contact-btn">
+      <svg viewBox="0 0 24 24"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg>
+      LinkedIn
+    </a>
+    <a href="https://t.me/LVsankt" target="_blank" rel="noopener" class="contact-btn">
+      <svg viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+      Telegram
+    </a>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <p>© 2026 Igor Pshenychnyi</p>
+  <p>HTML · CSS · JS — Vercel</p>
+</footer>
+
+<script>
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in');
+        io.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12 });
+
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+</script>
+
+</body>
+</html>
