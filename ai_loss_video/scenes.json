@@ -63,7 +63,7 @@
         ]
       ]
     },
-    "rubric": "04 / Мысль",
+    "rubric": "Мысль",
     "wordmark": "SOVAKAV",
     "tags": [
       "Сайты",
@@ -72,7 +72,8 @@
     ],
     "margin": 84,
     "caps": true,
-    "grain": 0.12
+    "grain": 0.12,
+    "number": "04"
   },
   "scenes": [
     {
