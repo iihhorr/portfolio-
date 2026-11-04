@@ -112,7 +112,7 @@ def photo(name, h_max=None):
     """Ч/б: autocontrast + контраст +12 %; вписано в область без растяжения (с запасом 1.03 под зум)."""
     im = ImageOps.exif_transpose(Image.open(os.path.join(PHOTOS, f"{name}.jpg"))).convert("L")
     im = ImageEnhance.Contrast(ImageOps.autocontrast(im, cutoff=0.5)).enhance(1.12).convert("RGB")
-    aw, ah = AREA[2] - AREA[0], (h_max or AREA[3] - AREA[1])
+    aw, ah = AREA[2] - AREA[0] - 12, (h_max or AREA[3] - AREA[1])   # −12 px: запас под тряску ±6 px
     s = min(aw / im.width, ah / im.height)
     tw, th = round(im.width * s), round(im.height * s)
     big = im.resize((math.ceil(tw * 1.03), math.ceil(th * 1.03)), Image.LANCZOS)
@@ -276,6 +276,10 @@ def render_frame(fi):
         if push != 1.0:
             cw, ch = W / push, H / push
             layer = layer.resize((W, H), Image.BICUBIC, box=((W - cw) / 2, (H - ch) / 2, (W + cw) / 2, (H + ch) / 2))
+        clip = Image.new("L", (W, H), 0)                  # толчок/тряска не выходят за поля 70…1010
+        ImageDraw.Draw(clip).rectangle((M, AREA[1] - 10, W - M, AREA[3] + 10), fill=255)
+        clip = np.roll(np.asarray(clip), (-sy, -sx), (0, 1))     # маска в координатах слоя до сдвига
+        layer.putalpha(Image.fromarray(np.minimum(np.asarray(layer.getchannel("A")), clip)))
         img.paste(layer, (sx, sy), layer)                 # тряска = сдвиг слоя
         if what == ["01"]:
             hook(img)
@@ -325,7 +329,7 @@ def main():
     ff.stdin.close(); ff.wait()
     preview = os.path.join(OUT, "video_preview.mp4")
     subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", silent, "-t", str(LENGTH), "-i", TRACK,
-                    "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
+                    "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11,alimiter=limit=0.79:level=disabled",
                     "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-t", str(LENGTH), "-movflags", "+faststart",
                     preview], check=True)
     print("\n  событие  пик (с)  кадр склейки  время склейки  Δ кадров")
