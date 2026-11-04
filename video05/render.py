@@ -175,7 +175,7 @@ def headline(img, s, t, x0=M, y0=200, size=88, center=False):
     lines, cur, cw = [], [], 0
     for i, (w, acc) in enumerate(s["words"]):
         ww = f.getlength(w)
-        if cur and cw + space + ww > 940:
+        if cur and cw + space + ww > (830 if center else 940):   # с запасом под зум 1.05
             lines.append((cur, cw)); cur, cw = [], 0
         cur.append((i, ww)); cw += (space if len(cur) > 1 else 0) + ww
     lines.append((cur, cw))
@@ -228,9 +228,11 @@ def card_time(c, th, lt, t):
 def card_zero(c, th, lt, t):
     d = ImageDraw.Draw(c, "RGBA")
     w = c.width
+    caps_label(d, 40, 60, "Клиенты и доход", th)
+    caps_label(d, w - 40, 60, "В месяц", th, align="right")
     rows = [("Клиенты в месяц", "0–1"), ("Доход", "€0")]
     for i, (lab, val) in enumerate(rows):
-        y = 190 + i * 210
+        y = 250 + i * 190
         caps_label(d, 40, y - 50, lab, th, size=20)
         d.text((w - 40, y), val, font=F("m700", 150), fill=th["fg"], anchor="rs")
         if i == 0:
@@ -240,29 +242,30 @@ def card_zero(c, th, lt, t):
 def card_plan(c, th, lt, t):
     d = ImageDraw.Draw(c, "RGBA")
     w = c.width
+    caps_label(d, 40, 60, "Мой план", th)
+    caps_label(d, w - 40, 60, "3 месяца", th, align="right")
     vals = [500, 1000, 1500]
+    heights = [130, 255, 380]                      # мин ~130, макс ~380 px
     times = [5.46, 5.94, 6.46]
-    base_y, top_y, cw = 318, 20, 150
-    x = 40
-    for i, (v, bt) in enumerate(zip(vals, times)):
+    base_y, cw, step = 440, 130, 210
+    for i, (v, hmax, bt) in enumerate(zip(vals, heights, times)):
+        x = 85 + i * step
         p = ease((t - bt) / 0.45)
-        hh = (base_y - top_y - 50) * (v / 1500) * p
+        hh = hmax * p
         if p > 0:
             d.rectangle((x, base_y - hh, x + cw, base_y), fill=th["fg"])
-            d.text((x, base_y - hh - 14), "+€" + fmt(v * p), font=F("m700", 36), fill=rgba(th["fg"], clamp(p * 3)),
-                   anchor="ls", features=TNUM)
+            d.text((x + cw / 2, base_y - hh - 14), "+€" + fmt(v * p), font=F("m700", 56),
+                   fill=rgba(th["fg"], clamp(p * 3)), anchor="ms", features=TNUM)
         d.line((x, base_y, x + cw, base_y), fill=th["line"], width=1)
-        caps_label(d, x, base_y + 34, f"Месяц {i + 1}", th)
-        x += cw + 70
-    if t >= 6.94:
+        caps_label(d, x, base_y + 28, f"Месяц {i + 1}", th)
+    if t >= 6.94:                                  # цель — внизу справа
         a = ease((t - 6.94) / 0.3)
         p = clamp((t - 6.94) / (7.99 - 6.94))
         p = 1 - (1 - p) ** 2
-        d.line((40, 370, w - 40, 370), fill=rgba(th["line"], a), width=1)
-        caps_label(d, 40, 440, "Цель накоплений", th, a=a, color=th["fg"])
-        caps_label(d, 40, 466, "план", th, a=a, size=18)
-        d.text((w - 40, 455), "€" + fmt(5000 * p), font=F("m700", 72), fill=rgba(th["fg"], a), anchor="rs",
+        caps_label(d, w - 40, 370, "Цель накоплений", th, a=a, color=th["fg"], align="right")
+        d.text((w - 40, 450), "€" + fmt(5000 * p), font=F("m700", 72), fill=rgba(th["fg"], a), anchor="rs",
                features=TNUM)
+        caps_label(d, w - 40, 470, "план", th, a=a, size=18, align="right")
 
 
 @lru_cache(None)
@@ -284,11 +287,18 @@ def draw_shot(img, s, lt):
     a = clamp(lt / 0.3)
     x = M
     y = int((CARD[1] + CARD[3]) / 2 - im.height / 2 + (1 - e) * 40)
-    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
-    layer.paste(im, (0, 0))
-    big = Image.new("RGBA", (im.width * 2, im.height * 2), (0, 0, 0, 0))
-    ImageDraw.Draw(big).rectangle((1, 1, im.width * 2 - 2, im.height * 2 - 2), outline=th["line"], width=3)
-    layer.alpha_composite(big.resize(im.size, Image.LANCZOS))
+    HS = 90                                          # шапка рамки
+    lw, lh = im.width, im.height + HS
+    y -= HS // 2
+    layer = Image.new("RGBA", (lw, lh), (0, 0, 0, 0))
+    layer.paste(im, (0, HS))
+    big = Image.new("RGBA", (lw * 2, lh * 2), (0, 0, 0, 0))
+    ImageDraw.Draw(big).rectangle((1, 1, lw * 2 - 2, lh * 2 - 2), outline=th["line"], width=3)
+    layer.alpha_composite(big.resize((lw, lh), Image.LANCZOS))
+    ld = ImageDraw.Draw(layer)
+    caps_label(ld, 40, 56, "Переписка", th)
+    caps_label(ld, lw - 40, 56, "Upwork", th, align="right")
+    ld.line((0, HS - 1, lw, HS - 1), fill=th["line"], width=1)
     if a < 1:
         layer.putalpha(layer.getchannel("A").point(lambda v: int(v * a)))
     img.paste(layer, (x, y), layer)
@@ -302,12 +312,14 @@ def check_icon(d, x, y, th, a):
 def card_list(c, th, lt, t):
     d = ImageDraw.Draw(c, "RGBA")
     w = c.width
+    caps_label(d, 40, 60, "Чек-лист", th)
+    caps_label(d, w - 40, 60, "С нуля", th, align="right")
     items = ["ИИ-ИНСТРУМЕНТЫ", "ПРОМПТЫ", "ПЕРВЫЕ КЛИЕНТЫ"]
     for i, (it, bt) in enumerate(zip(items, [11.28, 11.84, 12.38])):
         a = ease((t - bt) / 0.12)
         if a <= 0:
             continue
-        y = 70 + i * 135
+        y = 100 + i * 120
         if i:
             d.line((40, y - 25, w - 40, y - 25), fill=rgba(th["line"], a), width=1)
         check_icon(d, 40, y + 20 + (1 - a) * 10, th, a)
@@ -343,14 +355,25 @@ def draw_cta(img, s, t):
     f = F("m800", 60)
     col = th["fg"] + (int(255 * p),)
     d.text((M, 1405 + y), "БЕСПЛАТНЫЙ ГАЙД —", font=f, fill=col, anchor="ls")
-    d.text((M, 1480 + y), "ССЫЛКА В ПРОФИЛЕ ↘", font=f, fill=col, anchor="ls")
+    d.text((M, 1480 + y), "ССЫЛКА В ПРОФИЛЕ", font=f, fill=col, anchor="ls")
+    # стрелка ↘ линиями 90×90, 6 px; мигает на 13.47 и 14.00
+    blink = 1.0
+    for bt in (13.47, 14.00):
+        if bt <= t < bt + 0.2:
+            blink = 0.15
+    ac = th["fg"] + (int(255 * p * blink),)
+    ax = M + f.getlength("ССЫЛКА В ПРОФИЛЕ") + 24
+    ay = 1480 + y - 82
+    d.line((ax, ay, ax + 90, ay + 90), fill=ac, width=6)
+    d.line((ax + 90, ay + 90, ax + 30, ay + 90), fill=ac, width=6)
+    d.line((ax + 90, ay + 90, ax + 90, ay + 30), fill=ac, width=6)
 
 
 def draw_hook(img, th):
     d = ImageDraw.Draw(img)
-    f = F("m800", 110)
+    f = F("m800", 130)
     lines = ["МНЕ 19.", "ЕВРОПА.", "САЙТЫ С ИИ."]
-    lh = 110 * 1.1
+    lh = 130 * 1.1
     asc = f.getmetrics()[0]
     top = H * 0.46 - len(lines) * lh / 2
     for i, ln in enumerate(lines):
@@ -401,6 +424,15 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     GRAIN = grain_tiles()
     WAVE = wave_bars(load_audio())
+    if "--contact" in sys.argv:
+        ts = [0.0, 2.9, 4.8, 5.5, 7.0, 9.5, 11.5, 14.0]
+        sheet = Image.new("RGB", (4 * 540 + 30, 2 * 960 + 10), (128, 128, 128))
+        for i, t in enumerate(ts):
+            im = render_frame(min(NFR - 1, int(round(t * FPS)))).resize((540, 960), Image.LANCZOS)
+            ImageDraw.Draw(im).text((12, 300), f"{t:.1f}s", font=F("m700", 26), fill=(200, 30, 30))
+            sheet.paste(im, ((i % 4) * 550, (i // 4) * 970))
+        sheet.save(os.path.join(OUT, "contact.png"))
+        return
     if "--check" in sys.argv:
         ts = [0.0, 2.5, 6.8, 13.5]
         ims = []
