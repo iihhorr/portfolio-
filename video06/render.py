@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Ролик 05 / МЫСЛЬ — SOVAKAV. Pillow + numpy + FFmpeg.
+"""Ролик 06 / ЖИЗНЬ — фото-дамп SOVAKAV. Pillow + numpy + FFmpeg.
 
-    python render.py --check     # шаг 1: out/check_*.png + out/check.png
-    python render.py             # шаг 2: out/video_silent.mp4 + out/video_preview.mp4
+    python render.py --check    # out/check.png (t = 0.3, 2.88, 3.5, 9.95, 11.7)
+    python render.py            # out/video_silent.mp4 + out/video_preview.mp4 + таблица склеек
 """
 import math
 import multiprocessing as mp
@@ -12,33 +12,43 @@ import sys
 from functools import lru_cache
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-W, H, FPS, LENGTH = 1080, 1920, 30, 14.5
+W, H, FPS, LENGTH = 1080, 1920, 30, 12.0
 NFR = int(round(LENGTH * FPS))
 SR = 44100
-TRACK = os.path.join(ROOT, "input", "track.wav")
-SHOT = os.path.join(ROOT, "input", "client_msg_blurred.png")
+TRACK = os.path.join(ROOT, "input", "track.mp4")
+PHOTOS = os.path.join(ROOT, "input", "photos")
 OUT = os.path.join(ROOT, "out")
 
-BEATS = [0.07, 0.60, 1.11, 1.65, 2.18, 2.74, 3.27, 3.83, 4.39, 4.95, 5.46, 5.94, 6.46, 6.94, 7.45, 7.99,
-         8.54, 9.10, 9.66, 10.22, 10.75, 11.28, 11.84, 12.38, 12.93, 13.47, 14.00]
-FLASHES = [5.46, 11.28]
-
-# палитра
-DARK = dict(bg=(10, 10, 10), fg=(242, 242, 240), gray=(138, 138, 138), line=(255, 255, 255, 38))
-LIGHT = dict(bg=(239, 237, 232), fg=(10, 10, 10), gray=(138, 138, 138), line=(0, 0, 0, 38))
-
-M = 70                                   # поля
-CARD = (70, 820, 1010, 1300)             # x0, y0, x1, y1
+BG = (239, 237, 232)          # #efede8
+INK = (10, 10, 10)
+GRAY = (107, 107, 107)        # #6b6b6b
+LINE = (0, 0, 0, 38)          # чёрные 15 %
+M = 70
+AREA = (70, 200, 1010, 1500)  # область фото
 FOOT_Y = 1540
 
+SHOTS = [2.86, 2.96, 3.08, 3.34, 8.71, 8.94, 9.38, 9.61]
+CASH, FINAL = 9.91, 10.31
 
-# ------------------------------------------------------------------ шрифты
+# монтаж: (время начала, [фото])
+EDIT = [
+    (0.00, ["01"]), (1.18, ["02"]), (1.56, ["03"]), (1.93, ["04"]), (2.28, ["05"]), (2.65, ["06", "07"]),
+    (2.86, ["25"]), (2.96, ["08"]), (3.08, ["09"]), (3.34, ["11"]),
+    (4.85, ["10"]), (5.22, ["12"]), (5.60, ["13"]), (6.32, ["14"]), (6.69, ["15"]), (7.04, ["16"]),
+    (7.41, ["17"]), (7.78, ["18", "19"]),
+    (8.71, ["20"]), (8.94, ["21"]), (9.38, ["22"]), (9.61, ["23"]),
+    (CASH, "cash"), (FINAL, "final"),
+]
+CUTS = [(e[0], int(round(e[0] * FPS)), e[1]) for e in EDIT]
+
+
+# ------------------------------------------------------------------ шрифты / утилиты
 @lru_cache(None)
 def F(kind, size):
-    """'m800' 'm700' (Montserrat) | 'i400' 'i500' (Inter)."""
+    """'m700' 'm800' Montserrat; 'i300' 'i500' Inter."""
     path = os.path.join(ROOT, "fonts", "Montserrat-VF.ttf" if kind[0] == "m" else "Inter-VF.ttf")
     f = ImageFont.truetype(path, size)
     w = int(kind[1:])
@@ -46,71 +56,34 @@ def F(kind, size):
     return f
 
 
-TNUM = ["tnum"]
-
-
 def clamp(x, a=0.0, b=1.0):
     return max(a, min(b, x))
 
 
-def ease(t):                              # easeOutCubic
+def ease(t):
     t = clamp(t)
     return 1 - (1 - t) ** 3
 
 
-def rgba(c, a):
-    base = c[3] if len(c) == 4 else 255
-    return tuple(c[:3]) + (int(clamp(a) * base),)
-
-
-def caps_label(d, x, y, text, th, size=20, align="left", a=1.0, color=None, track=0.18):
-    f = F("i500", size)
-    text = text.upper()
-    w = sum(f.getlength(ch) for ch in text) + f.size * track * (len(text) - 1)
-    x = x - w if align == "right" else x
+def tracked(d, x, y, text, font, fill, em, align="left"):
+    w = sum(font.getlength(ch) for ch in text) + font.size * em * (len(text) - 1)
+    x = x - w if align == "right" else (x - w / 2 if align == "center" else x)
     for ch in text:
-        d.text((x, y), ch, font=f, fill=rgba(color or th["gray"], a), anchor="ls")
-        x += f.getlength(ch) + f.size * track
+        d.text((x, y), ch, font=font, fill=fill, anchor="ls")
+        x += font.getlength(ch) + font.size * em
     return w
-
-
-# ------------------------------------------------------------------ сцены
-# words: (текст, акцент); times — появление слов (на биты)
-SCENES = [
-    dict(start=0.00, end=1.11, th=DARK, kind="hook"),
-    dict(start=1.11, end=3.27, th=DARK, words=[("РАНЬШЕ:", True)], times=[1.11], card="time"),
-    dict(start=3.27, end=4.39, th=DARK, words=[("0 КЛИЕНТОВ.", False), ("€0.", True)], times=[3.27, 3.83],
-         remark=("(работал официантом)", 3.83), card="zero"),
-    dict(start=4.39, end=5.46, th=DARK, kind="center",
-         words=[("А", False), ("ПОТОМ", False), ("Я", False), ("ПОНЯЛ", False), ("ОДНУ", True), ("ВЕЩЬ", True)],
-         times=[4.39, 4.50, 4.62, 4.73, 4.84, 4.95]),
-    dict(start=5.46, end=8.54, th=LIGHT, words=[("МОЙ", False), ("ПЛАН", True)], times=[5.46, 5.94], card="plan"),
-    dict(start=8.54, end=11.28, th=DARK,
-         words=[("КЛИЕНТЫ", False), ("СО", True), ("ВСЕГО", True), ("МИРА", True)],
-         times=[8.54, 9.10, 9.66, 10.22], card="shot"),
-    dict(start=11.28, end=14.50, th=LIGHT,
-         words=[("КАК", False), ("Я", False), ("ЭТО", False), ("СДЕЛАЛ", True)],
-         times=[11.28, 11.84, 12.38, 12.93], card="list"),
-]
-
-
-def scene_at(t):
-    for s in SCENES:
-        if t < s["end"]:
-            return s
-    return SCENES[-1]
 
 
 # ------------------------------------------------------------------ звук → волна
 def load_audio():
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", TRACK, "-ac", "1", "-ar", str(SR), "-f", "f32le", "-"],
-                         capture_output=True, check=True).stdout
-    a = np.frombuffer(raw, np.float32)[: int(LENGTH * SR)]
-    return np.pad(a, (0, max(0, int(LENGTH * SR) - len(a))))
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", TRACK, "-vn", "-t", str(LENGTH), "-ac", "1", "-ar", str(SR),
+                          "-f", "f32le", "-"], capture_output=True, check=True).stdout
+    a = np.frombuffer(raw, np.float32)
+    n = int(LENGTH * SR)
+    return np.pad(a[:n], (0, max(0, n - len(a))))
 
 
 def wave_bars(audio, nb=40):
-    """Высота столбиков от громкости трека (RMS) × лёгкая спектральная форма."""
     win = 2048
     edges = np.geomspace(40, 9000, nb + 1)
     freqs = np.fft.rfftfreq(win, 1 / SR)
@@ -119,8 +92,7 @@ def wave_bars(audio, nb=40):
     bands, rms = np.zeros((NFR, nb)), np.zeros(NFR)
     for fi in range(NFR):
         c = int(fi / FPS * SR)
-        seg = audio[max(0, c - win // 2): c + win // 2]
-        seg = np.pad(seg, (0, win - len(seg)))
+        seg = np.pad(audio[max(0, c - win // 2): c + win // 2], (0, win))[:win]
         sp = np.abs(np.fft.rfft(seg * hann))
         bands[fi] = [sp[ix].mean() if len(ix) else 0 for ix in idx]
         rms[fi] = np.sqrt(np.mean(seg ** 2))
@@ -134,283 +106,188 @@ def wave_bars(audio, nb=40):
     return out
 
 
-# ------------------------------------------------------------------ рисование
+# ------------------------------------------------------------------ фото
+@lru_cache(None)
+def photo(name, h_max=None):
+    """Ч/б: autocontrast + контраст +12 %; вписано в область без растяжения (с запасом 1.03 под зум)."""
+    im = ImageOps.exif_transpose(Image.open(os.path.join(PHOTOS, f"{name}.jpg"))).convert("L")
+    im = ImageEnhance.Contrast(ImageOps.autocontrast(im, cutoff=0.5)).enhance(1.12).convert("RGB")
+    aw, ah = AREA[2] - AREA[0], (h_max or AREA[3] - AREA[1])
+    s = min(aw / im.width, ah / im.height)
+    tw, th = round(im.width * s), round(im.height * s)
+    big = im.resize((math.ceil(tw * 1.03), math.ceil(th * 1.03)), Image.LANCZOS)
+    return big, (tw, th)
+
+
+def zoomed(name, z, h_max=None):
+    big, (tw, th) = photo(name, h_max)
+    # z=1.00 — всё фото целиком, z=1.03 — центральная часть на 3 % крупнее (без обрезки краёв на старте)
+    cw, ch = big.width / z, big.height / z
+    x, y = (big.width - cw) / 2, (big.height - ch) / 2
+    return big.resize((tw, th), Image.BICUBIC, box=(x, y, x + cw, y + ch))
+
+
+def framed(im):
+    d = ImageDraw.Draw(im)
+    d.rectangle((0, 0, im.width - 1, im.height - 1), outline=INK, width=2)
+    return im
+
+
+def photo_layer(names, z):
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    if len(names) == 1:
+        im = framed(zoomed(names[0], z))
+        x = AREA[0] + (AREA[2] - AREA[0] - im.width) // 2
+        y = AREA[1] + (AREA[3] - AREA[1] - im.height) // 2
+        layer.paste(im, (x, y))
+    else:                                            # пара: по 630 px в высоту, зазор 35
+        ims = [framed(zoomed(n, z, 630)) for n in names]
+        total = sum(i.height for i in ims) + 35
+        y = AREA[1] + (AREA[3] - AREA[1] - total) // 2
+        for im in ims:
+            layer.paste(im, (AREA[0] + (AREA[2] - AREA[0] - im.width) // 2, y))
+            y += im.height + 35
+    return layer
+
+
+# ------------------------------------------------------------------ рамка, текст
 def grain_tiles():
     rng = np.random.default_rng(3)
-    return [rng.normal(0, 255 * 0.03, (H, W)).astype(np.float32)[..., None] for _ in range(6)]
+    return [rng.normal(0, 255 * 0.035, (H, W)).astype(np.float32)[..., None] for _ in range(6)]
 
 
-def background(th, fi):
-    a = np.array(th["bg"], np.float32)[None, None, :] + GRAIN[fi % len(GRAIN)]
+def add_grain(img, fi):
+    a = np.asarray(img, np.float32) + GRAIN[fi % len(GRAIN)]
     return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), "RGB")
 
 
-def draw_frame_chrome(img, th, fi):
+def chrome(img, fi, inverted=False):
+    fg, gray = ((242, 242, 240), (180, 180, 180)) if inverted else (INK, GRAY)
+    line = (255, 255, 255, 60) if inverted else LINE
     d = ImageDraw.Draw(img, "RGBA")
-    caps_label(d, M, 110, "05 / Мысль", th, size=22)
-    f = F("m700", 26)
-    d.text((W - M, 110), "SOVAKAV", font=f, fill=th["fg"], anchor="rs")
-    d.line((M, 134, W - M, 134), fill=th["line"], width=1)
-    d.line((M, FOOT_Y, W - M, FOOT_Y), fill=th["line"], width=1)
+    tracked(d, M, 100, "06 / ЖИЗНЬ", F("i500", 22), gray, 0.18)
+    tracked(d, W - M, 100, "SOVAKAV", F("m700", 26), fg, 0.24, "right")
+    d.line((M, 145, W - M, 145), fill=line, width=1)
+    d.line((M, FOOT_Y, W - M, FOOT_Y), fill=line, width=1)
     cx, cy, r = M + 36, FOOT_Y + 20 + 36, 36
-    dark = th is DARK
-    d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(10, 10, 10) if dark else (242, 242, 240), outline=th["line"])
-    d.text((cx, cy), "SV", font=F("m700", 24), fill=(242, 242, 240) if dark else (10, 10, 10), anchor="mm")
-    caps_label(d, M + 92, cy + 7, "Сайты • ИИ • 2026", th, size=20)
+    circ, letters = ((242, 242, 240), INK) if inverted else (INK, (242, 242, 240))
+    d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=circ)
+    d.text((cx, cy), "SV", font=F("m700", 24), fill=letters, anchor="mm")
+    tracked(d, M + 92, cy + 7, "САЙТЫ • ИИ • 2026", F("i500", 20), gray, 0.18)
     vals = WAVE[min(fi, NFR - 1)]
     x0, x1, base, hmax = 640, W - M, cy + 28, 56
     gap = (x1 - x0 - 2 * 40) / 39
     for k, v in enumerate(vals):
         h = max(2, v * hmax)
         x = x0 + k * (2 + gap)
-        d.rectangle((x, base - h, x + 2, base), fill=th["fg"] + (220,))
+        d.rectangle((x, base - h, x + 2, base), fill=fg + (220,))
 
 
-def headline(img, s, t, x0=M, y0=200, size=88, center=False):
-    """Слова по одному на биты: fade 0.12 с + подъём 10 px. Акцент — основной цвет, остальное — серый."""
-    th = s["th"]
-    d = ImageDraw.Draw(img, "RGBA")
-    f = F("m800", size)
-    space = f.getlength(" ")
-    lines, cur, cw = [], [], 0
-    for i, (w, acc) in enumerate(s["words"]):
-        ww = f.getlength(w)
-        if cur and cw + space + ww > (830 if center else 940):   # с запасом под зум 1.05
-            lines.append((cur, cw)); cur, cw = [], 0
-        cur.append((i, ww)); cw += (space if len(cur) > 1 else 0) + ww
-    lines.append((cur, cw))
-    lh = size * 1.1
-    asc = f.getmetrics()[0]
-    top = (H * 0.47 - len(lines) * lh / 2) if center else y0
-    for li, (ln, lw) in enumerate(lines):
-        x = (W - lw) / 2 if center else x0
-        base = top + asc + li * lh
-        for i, ww in ln:
-            p = clamp((t - s["times"][i]) / 0.12)
-            if p > 0:
-                w, acc = s["words"][i]
-                col = th["fg"] if acc else th["gray"]
-                d.text((x, base + (1 - ease(p)) * 10), w, font=f, fill=col + (int(255 * p),), anchor="ls")
-            x += ww + space
-    return top + asc + (len(lines) - 1) * lh
+def plate(img, box):
+    ov = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(ov).rectangle(box, fill=BG + (int(255 * 0.92),))
+    img.paste(ov, (0, 0), ov)
 
 
-def card_box(th):
-    """1.5 px обводка (рисуется в 2× и уменьшается), без заливки, скругление 6."""
-    w, h = CARD[2] - CARD[0], CARD[3] - CARD[1]
-    big = Image.new("RGBA", (w * 2, h * 2), (0, 0, 0, 0))
-    ImageDraw.Draw(big).rounded_rectangle((1, 1, w * 2 - 2, h * 2 - 2), 12, outline=th["line"], width=3)
-    return big.resize((w, h), Image.LANCZOS)
-
-
-def bar(d, x, y, w, frac, th):
-    d.rectangle((x, y, x + w, y + 10), fill=th["line"])
-    if frac > 0:
-        d.rectangle((x, y, x + w * clamp(frac), y + 10), fill=th["fg"])
-
-
-def fmt(v):
-    return f"{int(round(v)):,}".replace(",", " ")
-
-
-def card_time(c, th, lt, t):
-    d = ImageDraw.Draw(c, "RGBA")
-    w = c.width
-    caps_label(d, 40, 60, "Время на 1 сайт", th)
-    caps_label(d, w - 40, 60, "Один проект", th, align="right")
-    d.text((36, 290), "2 НЕДЕЛИ", font=F("m700", 150), fill=th["fg"], anchor="ls")
-    frac = 0.0
-    for k, bt in enumerate([1.65, 2.18, 2.74]):          # три рывка до 90 %
-        frac += 0.3 * ease((t - bt) / 0.15)
-    bar(d, 40, 380, w - 80, frac, th)
-
-
-def card_zero(c, th, lt, t):
-    d = ImageDraw.Draw(c, "RGBA")
-    w = c.width
-    caps_label(d, 40, 60, "Клиенты и доход", th)
-    caps_label(d, w - 40, 60, "В месяц", th, align="right")
-    rows = [("Клиенты в месяц", "0–1"), ("Доход", "€0")]
-    for i, (lab, val) in enumerate(rows):
-        y = 250 + i * 190
-        caps_label(d, 40, y - 50, lab, th, size=20)
-        d.text((w - 40, y), val, font=F("m700", 150), fill=th["fg"], anchor="rs")
-        if i == 0:
-            d.line((40, y + 30, w - 40, y + 30), fill=th["line"], width=1)
-
-
-def card_plan(c, th, lt, t):
-    d = ImageDraw.Draw(c, "RGBA")
-    w = c.width
-    caps_label(d, 40, 60, "Мой план", th)
-    caps_label(d, w - 40, 60, "3 месяца", th, align="right")
-    vals = [500, 1000, 1500]
-    heights = [130, 255, 380]                      # мин ~130, макс ~380 px
-    times = [5.46, 5.94, 6.46]
-    base_y, cw, step = 440, 130, 210
-    for i, (v, hmax, bt) in enumerate(zip(vals, heights, times)):
-        x = 85 + i * step
-        p = ease((t - bt) / 0.45)
-        hh = hmax * p
-        if p > 0:
-            d.rectangle((x, base_y - hh, x + cw, base_y), fill=th["fg"])
-            d.text((x + cw / 2, base_y - hh - 14), "+€" + fmt(v * p), font=F("m700", 56),
-                   fill=rgba(th["fg"], clamp(p * 3)), anchor="ms", features=TNUM)
-        d.line((x, base_y, x + cw, base_y), fill=th["line"], width=1)
-        caps_label(d, x, base_y + 28, f"Месяц {i + 1}", th)
-    if t >= 6.94:                                  # цель — внизу справа
-        a = ease((t - 6.94) / 0.3)
-        p = clamp((t - 6.94) / (7.99 - 6.94))
-        p = 1 - (1 - p) ** 2
-        caps_label(d, w - 40, 370, "Цель накоплений", th, a=a, color=th["fg"], align="right")
-        d.text((w - 40, 450), "€" + fmt(5000 * p), font=F("m700", 72), fill=rgba(th["fg"], a), anchor="rs",
-               features=TNUM)
-        caps_label(d, w - 40, 470, "план", th, a=a, size=18, align="right")
-
-
-@lru_cache(None)
-def shot_bw():
-    im = Image.open(SHOT).convert("L")
-    im = ImageEnhance.Contrast(im).enhance(1.1).convert("RGB")
-    return im.resize((940, round(im.height * 940 / im.width)), Image.LANCZOS)
-
-
-def draw_shot(img, s, lt):
-    """Ч/б скриншот 940 px, рамка 1.5 px; увеличение 1.00→1.06 внутри рамки (рамка не выходит за поля)."""
-    th = s["th"]
-    src = shot_bw()
-    z = 1.0 + 0.06 * clamp(lt / (s["end"] - s["start"]))
-    cw, ch = src.width / z, src.height / z
-    box = ((src.width - cw) / 2, (src.height - ch) / 2, (src.width + cw) / 2, (src.height + ch) / 2)
-    im = src.resize(src.size, Image.BICUBIC, box=box)
-    e = ease(lt / 0.3)
-    a = clamp(lt / 0.3)
-    x = M
-    y = int((CARD[1] + CARD[3]) / 2 - im.height / 2 + (1 - e) * 40)
-    HS = 90                                          # шапка рамки
-    lw, lh = im.width, im.height + HS
-    y -= HS // 2
-    layer = Image.new("RGBA", (lw, lh), (0, 0, 0, 0))
-    layer.paste(im, (0, HS))
-    big = Image.new("RGBA", (lw * 2, lh * 2), (0, 0, 0, 0))
-    ImageDraw.Draw(big).rectangle((1, 1, lw * 2 - 2, lh * 2 - 2), outline=th["line"], width=3)
-    layer.alpha_composite(big.resize((lw, lh), Image.LANCZOS))
-    ld = ImageDraw.Draw(layer)
-    caps_label(ld, 40, 56, "Переписка", th)
-    caps_label(ld, lw - 40, 56, "Upwork", th, align="right")
-    ld.line((0, HS - 1, lw, HS - 1), fill=th["line"], width=1)
-    if a < 1:
-        layer.putalpha(layer.getchannel("A").point(lambda v: int(v * a)))
-    img.paste(layer, (x, y), layer)
-
-
-def check_icon(d, x, y, th, a):
-    d.rectangle((x, y, x + 40, y + 40), outline=rgba(th["fg"], a), width=2)
-    d.line([(x + 9, y + 21), (x + 17, y + 30), (x + 32, y + 11)], fill=rgba(th["fg"], a), width=2)
-
-
-def card_list(c, th, lt, t):
-    d = ImageDraw.Draw(c, "RGBA")
-    w = c.width
-    caps_label(d, 40, 60, "Чек-лист", th)
-    caps_label(d, w - 40, 60, "С нуля", th, align="right")
-    items = ["ИИ-ИНСТРУМЕНТЫ", "ПРОМПТЫ", "ПЕРВЫЕ КЛИЕНТЫ"]
-    for i, (it, bt) in enumerate(zip(items, [11.28, 11.84, 12.38])):
-        a = ease((t - bt) / 0.12)
-        if a <= 0:
-            continue
-        y = 100 + i * 120
-        if i:
-            d.line((40, y - 25, w - 40, y - 25), fill=rgba(th["line"], a), width=1)
-        check_icon(d, 40, y + 20 + (1 - a) * 10, th, a)
-        d.text((110, y + 58 + (1 - a) * 10), it, font=F("m800", 52), fill=rgba(th["fg"], a), anchor="ls")
-
-
-CARDS = {"time": card_time, "zero": card_zero, "plan": card_plan, "list": card_list}
-
-
-def draw_card(img, s, t):
-    lt = t - s["start"]
-    th = s["th"]
-    if s.get("card") == "shot":
-        draw_shot(img, s, lt)
-        return
-    if not s.get("card"):
-        return
-    c = card_box(th)
-    CARDS[s["card"]](c, th, lt, t)
-    e, a = ease(lt / 0.3), clamp(lt / 0.3)
-    if a < 1:
-        c.putalpha(c.getchannel("A").point(lambda v: int(v * a)))
-    img.paste(c, (CARD[0], int(CARD[1] + (1 - e) * 40)), c)
-
-
-def draw_cta(img, s, t):
-    if t < 12.93:
-        return
-    th = s["th"]
-    d = ImageDraw.Draw(img, "RGBA")
-    p = clamp((t - 12.93) / 0.12)
-    y = (1 - ease(p)) * 10
-    f = F("m800", 60)
-    col = th["fg"] + (int(255 * p),)
-    d.text((M, 1405 + y), "БЕСПЛАТНЫЙ ГАЙД —", font=f, fill=col, anchor="ls")
-    d.text((M, 1480 + y), "ССЫЛКА В ПРОФИЛЕ", font=f, fill=col, anchor="ls")
-    # стрелка ↘ линиями 90×90, 6 px; мигает на 13.47 и 14.00
-    blink = 1.0
-    for bt in (13.47, 14.00):
-        if bt <= t < bt + 0.2:
-            blink = 0.15
-    ac = th["fg"] + (int(255 * p * blink),)
-    ax = M + f.getlength("ССЫЛКА В ПРОФИЛЕ") + 24
-    ay = 1480 + y - 82
-    d.line((ax, ay, ax + 90, ay + 90), fill=ac, width=6)
-    d.line((ax + 90, ay + 90, ax + 30, ay + 90), fill=ac, width=6)
-    d.line((ax + 90, ay + 90, ax + 90, ay + 30), fill=ac, width=6)
-
-
-def draw_hook(img, th):
+def hook(img):
+    plate(img, (70, 170, 1010, 560))
     d = ImageDraw.Draw(img)
-    f = F("m800", 130)
-    lines = ["МНЕ 19", "ЕВРОПА", "САЙТЫ С ИИ"]
-    lh = 130 * 1.1
+    f = F("m800", 108)
     asc = f.getmetrics()[0]
-    top = H * 0.46 - len(lines) * lh / 2
-    for i, ln in enumerate(lines):
-        d.text((W / 2, top + asc + i * lh), ln, font=f, fill=th["fg"], anchor="ms")
+    for i, ln in enumerate(["ГОД НАЗАД", "Я ЖИЛ", "ПО-ДРУГОМУ."]):
+        d.text((100, 170 + 22 + asc * 0.92 + i * 118), ln, font=f, fill=INK, anchor="ls")
+
+
+def laptop_text(img, t):
+    text = "всё это — с ноутбука"
+    n = min(len(text), int((t - 3.34) / 0.03) + 1)
+    plate(img, (70, 1370, 1010, 1470))
+    ImageDraw.Draw(img).text((W / 2 - F("i300", 52).getlength(text) / 2, 1438), text[:n],
+                             font=F("i300", 52), fill=INK, anchor="ls")
+
+
+def cash(img):
+    ImageDraw.Draw(img).text((W / 2, H / 2), "+1 КЛИЕНТ", font=F("m800", 120), fill=(242, 242, 240), anchor="mm")
+
+
+def final(img, t):
+    d = ImageDraw.Draw(img, "RGBA")
+    f = F("m800", 118)
+    lines = [("ХОЧЕШЬ", 10.33), ("ТАК ЖЕ?", 10.70), ("ПОЙДЁМ", 11.08), ("СО МНОЙ.", 11.45)]
+    lh = 118 * 1.1
+    top = 600
+    for i, (ln, bt) in enumerate(lines):
+        p = clamp((t - bt) / 0.12)
+        if p > 0:
+            d.text((W / 2, top + i * lh + (1 - ease(p)) * 10), ln, font=f, fill=INK + (int(255 * p),), anchor="ms")
+    if t >= 11.45:
+        p = clamp((t - 11.45) / 0.12)
+        lw = max(f.getlength(ln) for ln, _ in lines)
+        y = top + 3 * lh + 60
+        d.rectangle((W / 2 - lw / 2, y, W / 2 + lw / 2, y + 3), fill=INK + (int(255 * p),))
+        d.text((W / 2, y + 80), "сайты с ИИ — гайд в профиле", font=F("i500", 36), fill=GRAY + (int(255 * p),),
+               anchor="ms")
+
+
+# ------------------------------------------------------------------ кадр
+def cut_index(fi):
+    j = 0
+    for i, (_, f0, _) in enumerate(CUTS):
+        if f0 <= fi:
+            j = i
+    return j
+
+
+def shot_fx(fi):
+    """Для кадра: (белая вспышка 0..1, толчок-зум, сдвиг тряски)."""
+    for s in SHOTS:
+        f0 = int(round(s * FPS))
+        k = fi - f0
+        if 0 <= k < 2:
+            return (0.85 if k == 0 else 0.45), 1.06, (0, 0)
+        if 2 <= k < 2 + int(round(0.15 * FPS)) + 2:
+            pz = 1.06 + (1.0 - 1.06) * ease((k - 2) / (0.15 * FPS))
+            sh = (0, 0)
+            if k - 2 < 4:                              # тряска ±6 px на 4 кадра
+                rng = np.random.default_rng(f0 * 10 + k)
+                sh = tuple(int(v) for v in rng.choice([-6, -4, 4, 6], 2))
+            return 0.0, pz, sh
+    return 0.0, 1.0, (0, 0)
 
 
 def render_frame(fi):
     t = fi / FPS
-    s = scene_at(t)
-    th = s["th"]
-    for fl in FLASHES:                                   # белая вспышка 2 кадра
-        if round(fl * FPS) <= fi < round(fl * FPS) + 2:
-            img = Image.new("RGB", (W, H), (255, 255, 255))
-            draw_frame_chrome(img, LIGHT, fi)
-            return img
-    img = background(th, fi)
-    kind = s.get("kind")
-    if kind == "hook":
-        draw_hook(img, th)
-    elif kind == "center":
-        layer = background(th, fi)
-        headline(layer, s, t, center=True)
-        z = 1.0 + 0.05 * clamp((t - s["start"]) / (s["end"] - s["start"]))   # медленный зум 1.00→1.05
-        cw, ch = W / z, H / z
-        img = layer.resize((W, H), Image.BICUBIC, box=((W - cw) / 2, (H - ch) / 2, (W + cw) / 2, (H + ch) / 2))
+    j = cut_index(fi)
+    start, f0, what = CUTS[j]
+    f_end = CUTS[j + 1][1] if j + 1 < len(CUTS) else NFR
+    if what == "cash":
+        img = Image.new("RGB", (W, H), INK)
+        cash(img)
+        img = add_grain(img, fi)
+        chrome(img, fi, inverted=True)
+        return img
+    img = Image.new("RGB", (W, H), BG)
+    if what == "final":
+        final(img, t)
     else:
-        draw_card(img, s, t)
-        bottom = headline(img, s, t)
-        if s.get("remark"):
-            text, rt = s["remark"]
-            p = clamp((t - rt) / 0.12)
-            if p > 0:
-                ImageDraw.Draw(img, "RGBA").text((M, bottom + 70 + (1 - ease(p)) * 10), text,
-                                                 font=F("i400", 34), fill=th["gray"] + (int(255 * p),), anchor="ls")
-        if s is SCENES[-1]:
-            draw_cta(img, s, t)
-    draw_frame_chrome(img, th, fi)
+        z = 1.0 + 0.03 * (fi - f0) / max(1, f_end - f0)     # медленный зум 1.00→1.03
+        flash, push, (sx, sy) = shot_fx(fi)
+        layer = photo_layer(what, z)
+        if push != 1.0:
+            cw, ch = W / push, H / push
+            layer = layer.resize((W, H), Image.BICUBIC, box=((W - cw) / 2, (H - ch) / 2, (W + cw) / 2, (H + ch) / 2))
+        img.paste(layer, (sx, sy), layer)                 # тряска = сдвиг слоя
+        if what == ["01"]:
+            hook(img)
+        if what == ["11"]:
+            laptop_text(img, t)
+        if flash > 0:                                     # белая вспышка 2 кадра
+            img = Image.blend(img, Image.new("RGB", (W, H), (255, 255, 255)), flash)
+        d = ImageDraw.Draw(img)                           # рамка и подвал не трясутся
+        d.rectangle((0, 0, W, 190), fill=BG)
+        d.rectangle((0, FOOT_Y - 30, W, H), fill=BG)
+    img = add_grain(img, fi)
+    chrome(img, fi)
     return img
 
 
@@ -424,26 +301,17 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     GRAIN = grain_tiles()
     WAVE = wave_bars(load_audio())
-    if "--contact" in sys.argv:
-        ts = [0.0, 2.9, 4.8, 5.5, 7.0, 9.5, 11.5, 14.0]
-        sheet = Image.new("RGB", (4 * 540 + 30, 2 * 960 + 10), (128, 128, 128))
-        for i, t in enumerate(ts):
-            im = render_frame(min(NFR - 1, int(round(t * FPS)))).resize((540, 960), Image.LANCZOS)
-            ImageDraw.Draw(im).text((12, 300), f"{t:.1f}s", font=F("m700", 26), fill=(200, 30, 30))
-            sheet.paste(im, ((i % 4) * 550, (i // 4) * 970))
-        sheet.save(os.path.join(OUT, "contact.png"))
-        return
     if "--check" in sys.argv:
-        ts = [0.0, 2.5, 6.8, 13.5]
-        ims = []
-        for t in ts:
-            im = render_frame(int(round(t * FPS)))
-            im.save(os.path.join(OUT, f"check_{t:.1f}.png"))
-            ims.append(im)
-        sheet = Image.new("RGB", (W * 4 + 30, H), (128, 128, 128))
-        for i, im in enumerate(ims):
-            sheet.paste(im, (i * (W + 10), 0))
-        sheet.resize((sheet.width // 2, H // 2), Image.LANCZOS).save(os.path.join(OUT, "check.png"))
+        ts = [0.3, 2.88, 3.5, 9.95, 11.7]
+        sheet = Image.new("RGB", (5 * 540 + 40, 960), (128, 128, 128))
+        for i, t in enumerate(ts):
+            fi = int(round(t * FPS))
+            im = render_frame(fi)
+            im.save(os.path.join(OUT, f"check_{t}.png"))
+            im = im.resize((540, 960), Image.LANCZOS)
+            ImageDraw.Draw(im).text((12, 200), f"{t}s (кадр {fi})", font=F("m700", 24), fill=(200, 30, 30))
+            sheet.paste(im, (i * 550, 0))
+        sheet.save(os.path.join(OUT, "check.png"))
         print(os.path.join(OUT, "check.png"))
         return
     silent = os.path.join(OUT, "video_silent.mp4")
@@ -456,10 +324,15 @@ def main():
             ff.stdin.write(b)
     ff.stdin.close(); ff.wait()
     preview = os.path.join(OUT, "video_preview.mp4")
-    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", silent, "-ss", "0", "-t", str(LENGTH), "-i", TRACK,
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", silent, "-t", str(LENGTH), "-i", TRACK,
                     "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
-                    "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-shortest", "-movflags", "+faststart", preview],
-                   check=True)
+                    "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-t", str(LENGTH), "-movflags", "+faststart",
+                    preview], check=True)
+    print("\n  событие  пик (с)  кадр склейки  время склейки  Δ кадров")
+    for s in SHOTS + [CASH, FINAL]:
+        f0 = int(round(s * FPS))
+        print(f"  {'SHOT' if s in SHOTS else ('CASH' if s == CASH else 'FINAL'):<7} {s:7.2f}  {f0:12d}  {f0 / FPS:13.3f}"
+              f"  {(f0 / FPS - s) * FPS:+8.2f}")
     print(silent); print(preview)
 
 
