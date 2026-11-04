@@ -372,7 +372,7 @@ def draw_cta(img, s, t):
 def draw_hook(img, th):
     d = ImageDraw.Draw(img)
     f = F("m800", 130)
-    lines = ["МНЕ 19.", "ЕВРОПА.", "САЙТЫ С ИИ."]
+    lines = ["МНЕ 19", "ЕВРОПА", "САЙТЫ С ИИ"]
     lh = 130 * 1.1
     asc = f.getmetrics()[0]
     top = H * 0.46 - len(lines) * lh / 2
