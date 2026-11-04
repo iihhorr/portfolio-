@@ -1,39 +1,44 @@
-"""Card drawing for the TikTok visualizer. Every card is rendered as an RGBA image
-of fixed width; render.py handles placement, tilt, breathing and shadow."""
+"""SOVAKAV-style cards: monochrome, thin lines, caps labels with wide tracking.
+No glass, no colour, no emoji, no springs. Each card is an RGBA image; render.py places it."""
 import math
 import os
 from functools import lru_cache
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFont
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-FONT_FILES = {
-    "reg": "Inter-Regular.ttf",
-    "semi": "Inter-SemiBold.ttf",
-    "bold": "Inter-Bold.ttf",
-    "xbold": "Inter-ExtraBold.ttf",
-}
-GLASS = (21, 22, 28)          # #15161c
-GLASS_ALPHA = 235             # 92 %
-OUTLINE = (255, 255, 255, 26)  # #ffffff1a
-RADIUS = 36
-GRAY = (139, 141, 152)
-WHITE = (255, 255, 255)
-GREEN, YELLOW, RED = (51, 209, 122), (245, 197, 66), (255, 77, 79)
+
+# ------------------------------------------------------------ palette (DESIGN.md §3)
+INK = (10, 10, 10)          # #0A0A0A
+PAPER = (244, 242, 238)     # #F4F2EE
+GRAPHITE = (107, 104, 98)   # #6B6862  — light bg, large text only
+MUTED = (154, 148, 138)     # #9A948A  — captions on dark
+DIM = (28, 27, 25)          # #1C1B19
+SOFT = (138, 134, 126)      # #8A867E  — "lighter tone" line of a headline
 
 
-# ---------------------------------------------------------------- helpers
+def theme(name):
+    if name == "light":
+        return dict(name="light", bg=PAPER, fg=INK, small=INK, soft=GRAPHITE,
+                    line=INK + (89,), track=INK + (28,), ghost=INK + (40,))
+    return dict(name="dark", bg=INK, fg=PAPER, small=MUTED, soft=SOFT,
+                line=PAPER + (89,), track=DIM + (255,), ghost=PAPER + (40,))
+
+
+# ------------------------------------------------------------ fonts (DESIGN.md §4)
 @lru_cache(None)
 def F(kind, size):
-    from PIL import ImageFont
-    return ImageFont.truetype(os.path.join(ROOT, "fonts", FONT_FILES[kind]), size)
+    """kind: 'reg' 400, 'med' 500, 'bold' 700 (Montserrat) or 'mark' (Archivo 600, width 125)."""
+    if kind == "mark":
+        f = ImageFont.truetype(os.path.join(ROOT, "fonts", "Archivo-VF.ttf"), size)
+        f.set_variation_by_axes([600, 125])
+        return f
+    f = ImageFont.truetype(os.path.join(ROOT, "fonts", "Montserrat-VF.ttf"), size)
+    f.set_variation_by_axes([{"reg": 400, "med": 500, "bold": 700}[kind]])
+    return f
 
 
-def hex2rgb(h):
-    h = h.lstrip("#")
-    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
-
-
+# ------------------------------------------------------------ easing (power3/expo out)
 def clamp(x, a=0.0, b=1.0):
     return max(a, min(b, x))
 
@@ -42,357 +47,239 @@ def lerp(a, b, t):
     return a + (b - a) * t
 
 
-def lerp_col(c1, c2, t):
-    return tuple(int(round(lerp(a, b, t))) for a, b in zip(c1, c2))
-
-
-def ease_in_out(t):
-    t = clamp(t)
-    return 3 * t * t - 2 * t * t * t if t < 1 else 1.0
-
-
-def ease_out(t):
+def power3_out(t):
     t = clamp(t)
     return 1 - (1 - t) ** 3
 
 
-def ease_out_back(t, s=1.70158):
-    t = clamp(t) - 1
-    return t * t * ((s + 1) * t + s) + 1
-
-
-def value_color(good):
-    """good: 1 -> green, 0.5 -> yellow, 0 -> red"""
-    good = clamp(good)
-    if good >= 0.5:
-        return lerp_col(YELLOW, GREEN, (good - 0.5) * 2)
-    return lerp_col(RED, YELLOW, good * 2)
-
-
-def ev_time(cfg, ctx, key="at", word_key="at_word", off_key="offset"):
-    """Resolve an event time (seconds from scene start)."""
-    if word_key in cfg:
-        idx = min(cfg[word_key], len(ctx["word_times"]) - 1)
-        return ctx["word_times"][idx] + cfg.get(off_key, 0.0)
-    return cfg.get(key, 0.0)
+def expo_out(t):
+    t = clamp(t)
+    return 1.0 if t >= 1 else 1 - 2 ** (-10 * t)
 
 
 def anim(t, start, dur):
     return clamp((t - start) / dur) if dur > 0 else float(t >= start)
 
 
-@lru_cache(None)
-def round_mask(w, h, r):
-    big = Image.new("L", (w * 3, h * 3), 0)
-    ImageDraw.Draw(big).rounded_rectangle((0, 0, w * 3 - 1, h * 3 - 1), r * 3, fill=255)
-    return big.resize((w, h), Image.LANCZOS)
+def ev_time(cfg, ctx, key="at", word_key="at_word", off_key="offset"):
+    if word_key in cfg:
+        idx = min(cfg[word_key], len(ctx["word_times"]) - 1)
+        return ctx["word_times"][idx] + cfg.get(off_key, 0.0)
+    return cfg.get(key, 0.0)
 
 
-@lru_cache(None)
-def shadow(w, h, pad):
-    im = Image.new("L", (w + pad * 2, h + pad * 2), 0)
-    ImageDraw.Draw(im).rounded_rectangle((pad, pad + 18, pad + w, pad + h + 18), RADIUS, fill=150)
-    return im.filter(ImageFilter.GaussianBlur(pad / 2.2))
+def rgba(c, a):
+    return tuple(c[:3]) + (int(clamp(a) * (c[3] if len(c) == 4 else 255)),)
 
 
-def is_emoji(ch):
-    o = ord(ch)
-    return o >= 0x1F000 or 0x2600 <= o <= 0x27BF or o in (0xFE0F,)
+# ------------------------------------------------------------ text helpers
+def tracked_width(text, font, em):
+    if not text:
+        return 0
+    return sum(font.getlength(ch) for ch in text) + font.size * em * (len(text) - 1)
 
 
-@lru_cache(None)
-def emoji_img(ch, size):
-    from PIL import ImageFont
-    f = ImageFont.truetype(os.path.join(ROOT, "fonts", "NotoColorEmoji.ttf"), 109)
-    im = Image.new("RGBA", (160, 160), (0, 0, 0, 0))
-    ImageDraw.Draw(im).text((10, 10), ch, font=f, embedded_color=True)
-    im = im.crop(im.getbbox())
-    return im.resize((int(im.width * size / im.height), size), Image.LANCZOS)
-
-
-def rich_runs(text):
-    runs, cur = [], ""
+def tracked(d, x, y, text, font, fill, em=0.35, align="left"):
+    """Caps label with letter spacing; (x, y) = baseline. align left|right|center."""
+    w = tracked_width(text, font, em)
+    if align == "right":
+        x -= w
+    elif align == "center":
+        x -= w / 2
     for ch in text:
-        if ch == "️":
-            continue
-        if is_emoji(ch):
-            if cur:
-                runs.append(("t", cur))
-                cur = ""
-            runs.append(("e", ch))
-        else:
-            cur += ch
-    if cur:
-        runs.append(("t", cur))
-    return runs
+        d.text((x, y), ch, font=font, fill=fill, anchor="ls")
+        x += font.getlength(ch) + font.size * em
+    return w
 
 
-def rich_width(text, font):
-    return sum(font.getlength(s) if k == "t" else font.size * 1.1 for k, s in rich_runs(text))
+def label(d, x, y, text, th, a=1.0, align="left", size=20):
+    tracked(d, x, y, text.upper(), F("med", size), rgba(th["small"], a), 0.35, align)
 
 
-def draw_rich(img, d, x, y, text, font, fill):
-    """Text with color emoji. (x, y) = left baseline."""
-    for k, s in rich_runs(text):
-        if k == "t":
-            d.text((x, y), s, font=font, fill=fill, anchor="ls")
-            x += font.getlength(s)
-        else:
-            e = emoji_img(s, int(font.size * 0.95))
-            if len(fill) == 4 and fill[3] < 255:
-                e = e.copy()
-                e.putalpha(e.getchannel("A").point(lambda a: a * fill[3] // 255))
-            img.paste(e, (int(x + font.size * 0.07), int(y - font.size * 0.82)), e)
-            x += font.size * 1.1
-    return x
-
-
-def bar(d, x, y, w, h, frac, color, track=(255, 255, 255, 28)):
-    d.rounded_rectangle((x, y, x + w, y + h), h // 2, fill=track)
-    fw = max(0.0, min(1.0, frac)) * w
-    if fw > 0.5:
-        fw = max(fw, h)
-        d.rounded_rectangle((x, y, x + fw, y + h), h // 2, fill=color)
-
-
-def header(d, w, title, tag=None):
-    d.text((48, 52), title, font=F("semi", 30), fill=GRAY, anchor="ls")
-    if tag:
-        d.text((w - 48, 52), tag, font=F("semi", 26), fill=GRAY, anchor="rs")
-
-
-def base(w, h):
-    img = Image.new("RGB", (w, h), GLASS)
-    d = ImageDraw.Draw(img, "RGBA")
-    # soft top highlight to sell the "glass"
-    for i in range(120):
-        d.line((0, i, w, i), fill=(255, 255, 255, int(10 * (1 - i / 120))))
-    return img, d
-
-
-def finish(img):
-    w, h = img.size
-    out = img.convert("RGBA")
-    m = round_mask(w, h, RADIUS).point(lambda a: a * GLASS_ALPHA // 255)
-    out.putalpha(m)
-    ImageDraw.Draw(out).rounded_rectangle((0, 0, w - 1, h - 1), RADIUS, outline=(255, 255, 255, 40), width=2)
-    return out
+def diamond(d, cx, cy, s, fill):
+    r = s / math.sqrt(2)
+    d.polygon([(cx, cy - r), (cx + r, cy), (cx, cy + r), (cx - r, cy)], fill=fill)
 
 
 def fmt_int(v):
     return f"{int(round(v)):,}".replace(",", " ")
 
 
-# ---------------------------------------------------------------- cards
-def card_meter(c, t, ctx, w):
-    h = 440
-    img, d = base(w, h)
-    header(d, w, c["title"], c.get("tag"))
-    t0 = ev_time(c, ctx)
-    p = ease_in_out(anim(t, t0, c.get("dur", 0.6)))
+def bar(d, x, y, w, h, frac, th, a=1.0):
+    d.rectangle((x, y, x + w, y + h), fill=rgba(th["track"], a))
+    fw = clamp(frac) * w
+    if fw >= 1:
+        d.rectangle((x, y, x + fw, y + h), fill=rgba(th["fg"], a))
+
+
+# ------------------------------------------------------------ frame of a card
+def base(w, h, th, title, tag=None):
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rectangle((0, 0, w - 1, h - 1), outline=th["line"], width=2)
+    label(d, 40, 58, title, th)
+    if tag:
+        label(d, w - 40, 58, tag, th, align="right")
+    d.line((40, 84, w - 40, 84), fill=th["line"], width=1)
+    return img, d
+
+
+# ------------------------------------------------------------ cards
+def card_meter(c, t, ctx, w, th):
+    h = 430
+    img, d = base(w, h, th, c["title"], c.get("tag"))
+    p = power3_out(anim(t, ev_time(c, ctx), c.get("dur", 0.8)))
     v = lerp(c["from"], c["to"], p)
-    col = value_color(v / 100.0)
     txt = fmt_int(v)
-    d.text((40, 250), txt, font=F("xbold", 160), fill=WHITE, anchor="ls")
-    x2 = 40 + F("xbold", 160).getlength(txt) + 6
-    d.text((x2, 250), c.get("suffix", ""), font=F("bold", 90), fill=WHITE, anchor="ls")
+    big = F("bold", 160)
+    d.text((34, 262), txt, font=big, fill=th["fg"], anchor="ls")
+    d.text((34 + big.getlength(txt) + 10, 262), c.get("suffix", ""), font=F("bold", 72), fill=th["fg"], anchor="ls")
     delta = c["to"] - c["from"]
     if p > 0.02:
-        a = int(255 * clamp(p * 2))
-        dc = RED if delta < 0 else GREEN
-        d.text((w - 48, 230), ("−" if delta < 0 else "+") + fmt_int(abs(delta) * p) + c.get("suffix", ""),
-               font=F("bold", 54), fill=dc + (a,), anchor="rs")
-    bar(d, 48, 300, w - 96, 26, v / 100.0, col)
-    d.text((48, 385), c.get("caption", ""), font=F("semi", 28), fill=GRAY, anchor="ls")
-    return finish(img)
+        s = ("−" if delta < 0 else "+") + fmt_int(abs(delta) * p) + c.get("suffix", "")
+        d.text((w - 40, 250), s, font=F("med", 44), fill=rgba(th["soft"], clamp(p * 2)), anchor="rs")
+    bar(d, 40, 302, w - 80, 10, v / 100.0, th)
+    label(d, 40, 380, c.get("caption", ""), th)
+    return img
 
 
-def card_bars(c, t, ctx, w):
+def card_bars(c, t, ctx, w, th):
     rows = c["rows"]
-    h = 130 + 150 * len(rows)
-    img, d = base(w, h)
-    header(d, w, c["title"], c.get("tag"))
-    p = ease_in_out(anim(t, ev_time(c, ctx), c.get("dur", 0.6)))
+    h = 120 + 150 * len(rows)
+    img, d = base(w, h, th, c["title"], c.get("tag"))
+    p = power3_out(anim(t, ev_time(c, ctx), c.get("dur", 1.0)))
     for i, r in enumerate(rows):
-        y = 140 + i * 150
-        col = hex2rgb(r["color"])
-        d.text((48, y + 20), r["label"], font=F("bold", 44), fill=WHITE, anchor="ls")
+        y = 150 + i * 150
+        label(d, 40, y + 14, r["label"], th, size=22)
         val = fmt_int(lerp(0, r["value"], p)) + r.get("unit", "")
-        d.text((w - 48, y + 22), val, font=F("xbold", 64), fill=col, anchor="rs")
-        bar(d, 48, y + 52, w - 96, 26, r["frac"] * p, col)
-    return finish(img)
+        col = th["fg"] if r.get("strong") else th["soft"]
+        d.text((w - 40, y + 22), val, font=F("bold", 64), fill=col, anchor="rs")
+        bar(d, 40, y + 50, w - 80, 10, r["frac"] * p, th)
+    return img
 
 
-def person(d, x, y, col, s=1.0):
-    r = 24 * s
-    d.ellipse((x - r, y, x + r, y + 2 * r), outline=col, width=5)
-    d.rounded_rectangle((x - 40 * s, y + 2 * r + 10 * s, x + 40 * s, y + 2 * r + 72 * s), 28 * s, outline=col, width=5)
+def person(d, x, y, col):
+    d.ellipse((x - 22, y, x + 22, y + 44), outline=col, width=3)
+    d.rectangle((x - 38, y + 58, x + 38, y + 116), outline=col, width=3)
 
 
-def card_people(c, t, ctx, w):
-    h = 460
-    img, d = base(w, h)
-    header(d, w, c["title"], c.get("tag"))
+def card_people(c, t, ctx, w, th):
+    h = 450
+    img, d = base(w, h, th, c["title"], c.get("tag"))
     total, remain = c["total"], c["remain"]
     t0, step = ev_time(c, ctx), c.get("step", 0.45)
     gone = 0
     for i in range(total):
-        idx_from_end = total - 1 - i
+        k = total - 1 - i
         fade = 0.0
-        if idx_from_end < total - remain:
-            ts = t0 + idx_from_end * step
-            fade = ease_in_out(anim(t, ts, 0.3))
-            if t >= ts + 0.15:
-                gone += 1
-        cx = 100 + (i % 3) * 130
-        cy = 110 + (i // 3) * 165
-        a = int(lerp(255, 40, fade))
-        colr = lerp_col(WHITE, RED, fade) + (a,)
-        person(d, cx, cy, colr)
+        if k < total - remain:
+            ts = t0 + k * step
+            fade = power3_out(anim(t, ts, 0.5))
+            gone += t >= ts + 0.2
+        cx, cy = 90 + (i % 3) * 120, 128 + (i // 3) * 150
+        person(d, cx, cy, rgba(th["fg"], lerp(1.0, 0.18, fade)))
     n = total - gone
-    d.text((520, 135), c.get("label", ""), font=F("semi", 32), fill=GRAY, anchor="ls")
-    good = (n - remain) / max(1, total - remain)
-    d.text((515, 300), str(n), font=F("xbold", 160), fill=value_color(good), anchor="ls")
+    label(d, 470, 150, c.get("label", ""), th)
+    d.text((462, 330), str(n), font=F("bold", 160), fill=th["fg"], anchor="ls")
     if n <= remain:
-        tb = t0 + (total - remain - 1) * step + 0.15
-        pop = ease_out_back(anim(t, tb, 0.3))
-        f = F("bold", 30)
-        bw = f.getlength(c.get("badge", "")) + 48
-        bx, by = 520, 340
-        sc = max(0.01, pop)
-        bh = 58 * sc
-        d.rounded_rectangle((bx, by + (58 - bh) / 2, bx + bw * sc, by + (58 + bh) / 2), int(29 * sc), fill=(229, 72, 77))
-        if pop > 0.6:
-            d.text((bx + 24, by + 40), c.get("badge", ""), font=f, fill=WHITE, anchor="ls")
-    return finish(img)
+        tb = t0 + (total - remain - 1) * step + 0.2
+        a = power3_out(anim(t, tb, 0.6))
+        f = F("med", 20)
+        txt = c.get("badge", "").upper()
+        bw = tracked_width(txt, f, 0.35) + 44
+        bx, by = 470, 370 + (1 - a) * 16
+        d.rectangle((bx, by, bx + bw, by + 44), fill=rgba(th["fg"], a))  # the one accent
+        tracked(d, bx + 22, by + 29, txt, f, rgba(th["bg"], a), 0.35)
+    return img
 
 
-def card_finance(c, t, ctx, w):
-    h = 470
-    img, d = base(w, h)
-    header(d, w, c["title"], c.get("tag"))
+def card_finance(c, t, ctx, w, th):
+    h = 440
+    img, d = base(w, h, th, c["title"], c.get("tag"))
     for i, r in enumerate(c["rows"]):
-        y = 140 + i * 140
-        p = ease_in_out(anim(t, ev_time(r, ctx), r.get("dur", 0.6)))
+        y = 150 + i * 130
+        p = power3_out(anim(t, ev_time(r, ctx), r.get("dur", 0.8)))
         v = lerp(r["from"], r["to"], p)
-        col = hex2rgb(r["color"])
-        d.text((48, y + 20), r["label"], font=F("bold", 42), fill=WHITE, anchor="ls")
-        d.text((w - 48, y + 22), fmt_int(v) + "%", font=F("xbold", 60), fill=col, anchor="rs")
-        bar(d, 48, y + 50, w - 96, 26, v / 100.0, col)
+        label(d, 40, y + 14, r["label"], th, size=22)
+        col = th["fg"] if r.get("strong") else th["soft"]
+        d.text((w - 40, y + 22), fmt_int(v) + "%", font=F("bold", 60), fill=col, anchor="rs")
+        bar(d, 40, y + 46, w - 80, 10, v / 100.0, th)
     b = c.get("blink")
     if b:
-        tb = ev_time(b, ctx)
-        if t >= tb:
-            a = 0.25 + 0.75 * (0.5 + 0.5 * math.cos((t - tb) * 2 * math.pi * 1.5))
-            a *= clamp((t - tb) / 0.15)
-            d.text((48, 425), b["text"], font=F("xbold", 58), fill=RED + (int(255 * a),), anchor="ls")
-    return finish(img)
+        a = power3_out(anim(t, ev_time(b, ctx), 0.8))
+        if a > 0:
+            d.line((40, 340, w - 40, 340), fill=th["line"], width=1)
+            d.text((40, 400 + (1 - a) * 20), b["text"], font=F("bold", 52), fill=rgba(th["fg"], a), anchor="ls")
+    return img
 
 
-def pill(text, bg, w, h):
-    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    d.rounded_rectangle((0, 0, w - 1, h - 1), h // 2, fill=bg)
-    f = F("bold", 30)
-    while f.getlength(text) > w - 24:
-        f = F("bold", f.size - 2)
-    d.text((w / 2, h / 2), text, font=f, fill=WHITE, anchor="mm")
-    return im
-
-
-def card_chat(c, t, ctx, w):
-    h = 490
-    img, d = base(w, h)
-    acc = ctx["accent"]
-    d.ellipse((48, 34, 120, 106), fill=acc)
-    d.text((84, 70), "ИИ", font=F("bold", 28), fill=WHITE, anchor="mm")
-    d.text((140, 66), c["name"], font=F("bold", 36), fill=WHITE, anchor="ls")
-    d.ellipse((140, 84, 154, 98), fill=GREEN)
-    d.text((164, 99), c.get("status", ""), font=F("semi", 26), fill=GREEN, anchor="ls")
-    # message bubble
+def card_chat(c, t, ctx, w, th):
+    h = 470
+    img, d = base(w, h, th, c["name"], c.get("status"))
     tm = ev_time(c, ctx)
-    pm = ease_out_back(anim(t, tm, 0.35))
-    am = clamp(anim(t, tm, 0.2))
-    if am > 0:
-        f = F("semi", 42)
-        tw = rich_width(c["message"], f)
-        bx, by, bw, bh = 48, 140 + (1 - pm) * 30, tw + 64, 92
-        d.rounded_rectangle((bx, by, bx + bw, by + bh), 30, fill=(48, 50, 64, int(255 * am)))
-        draw_rich(img, d, bx + 32, by + 60, c["message"], f, (255, 255, 255, int(255 * am)))
-    # typing indicator
-    tt = ev_time({"at_word": c.get("typing_at_word", 0), "offset": c.get("typing_offset", 0)}, ctx) \
+    a = power3_out(anim(t, tm, 0.7))
+    if a > 0:
+        f = F("med", 40)
+        y = 140 + (1 - a) * 24
+        tw = f.getlength(c["message"])
+        d.rectangle((40, y, 40 + tw + 64, y + 96), outline=rgba(th["fg"], a * 0.6), width=2)
+        d.text((72, y + 62), c["message"], font=f, fill=rgba(th["fg"], a), anchor="ls")
+    tt = ev_time({"at_word": c["typing_at_word"], "offset": c.get("typing_offset", 0)}, ctx) \
         if "typing_at_word" in c else c.get("typing_at", 2.0)
-    at = anim(t, tt, 0.2)
+    at = power3_out(anim(t, tt, 0.5))
     if at > 0:
-        by = 254
-        d.rounded_rectangle((48, by, 168, by + 60), 30, fill=(48, 50, 64, int(255 * at)))
+        y = 270
         for k in range(3):
-            ph = (t - tt) * 2 * math.pi * 1.6 - k * 0.9
-            dy = -6 * max(0.0, math.sin(ph))
-            a = int(255 * at * (0.45 + 0.55 * max(0.0, math.sin(ph))))
-            cx = 80 + k * 28
-            d.ellipse((cx - 8, by + 30 - 8 + dy, cx + 8, by + 30 + 8 + dy), fill=(220, 220, 230, a))
-        d.text((186, by + 40), "печатает…", font=F("semi", 28), fill=GRAY + (int(255 * at),), anchor="ls")
-    # flipping mini pills
+            ph = 0.5 + 0.5 * math.sin((t - tt) * 2 * math.pi * 1.2 - k * 0.9)
+            cx = 52 + k * 24
+            d.ellipse((cx - 6, y - 6, cx + 6, y + 6), fill=rgba(th["fg"], at * (0.25 + 0.75 * ph)))
+        label(d, 130, y + 7, "печатает", th, a=at)
     pills = c.get("pills", [])
     if pills:
-        gap = 18
-        pw = int((w - 96 - gap * (len(pills) - 1)) / len(pills))
-        ph_ = 76
+        gap = 16
+        pw = (w - 80 - gap * (len(pills) - 1)) / len(pills)
+        d.line((40, 320, w - 40, 320), fill=th["line"], width=1)
         for i, p in enumerate(pills):
-            ft = anim(t, p["at"], 0.45)
-            if ft < 0.5:
-                im = pill(p["from"], (150, 42, 48), pw, ph_)
-                sy = math.cos(ft * math.pi)
-            else:
-                im = pill(p["to"], (34, 160, 92), pw, ph_)
-                sy = -math.cos(ft * math.pi)
-            sh = max(2, int(ph_ * sy))
-            im = im.resize((pw, sh), Image.BICUBIC)
-            x = 48 + i * (pw + gap)
-            y = 370 + (ph_ - sh) // 2
-            img.paste(im, (x, y), im)
-    return finish(img)
+            ft = power3_out(anim(t, p["at"], 0.7))
+            x = 40 + i * (pw + gap)
+            label(d, x, 360, p.get("label", ""), th)
+            f = F("bold", 44)
+            if ft < 1:
+                d.text((x, 425 - ft * 20), p["from"], font=f, fill=rgba(th["soft"], 1 - ft), anchor="ls")
+            if ft > 0:
+                d.text((x, 445 - ft * 20), p["to"], font=f, fill=rgba(th["fg"], ft), anchor="ls")
+    return img
 
 
-def check_icon(d, cx, cy, r, s):
-    if s <= 0:
-        return
-    rr = r * s
-    d.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill=GREEN)
-    if s > 0.6:
-        d.line([(cx - r * .45, cy + r * .02), (cx - r * .1, cy + r * .38), (cx + r * .5, cy - r * .35)],
-               fill=WHITE, width=6, joint="curve")
-
-
-def card_notes(c, t, ctx, w):
+def card_notes(c, t, ctx, w, th):
     items = c["items"]
-    h = 210 + 82 * len(items)
-    img, d = base(w, h)
-    d.rounded_rectangle((48, 32, 76, 60), 7, fill=(255, 204, 0))
-    d.text((90, 57), c.get("label", "Заметки"), font=F("bold", 30), fill=(255, 204, 0), anchor="ls")
-    d.text((48, 140), c["title"], font=F("xbold", 58), fill=WHITE, anchor="ls")
+    h = 200 + 84 * len(items)
+    img, d = base(w, h, th, c.get("label", "Заметки"), c.get("tag"))
+    d.text((40, 160), c["title"].upper(), font=F("bold", 52), fill=th["fg"], anchor="ls")
     t0, step = ev_time(c, ctx), c.get("step", 0.6)
     for i, it in enumerate(items):
-        ti = t0 + i * step
-        a = ease_out(anim(t, ti, 0.25))
+        a = power3_out(anim(t, t0 + i * step, 0.6))
         if a <= 0:
             continue
-        y = 205 + i * 82
-        check_icon(d, 74, y + 22, 24, ease_out_back(anim(t, ti + 0.1, 0.3)))
-        d.text((118 - (1 - a) * 30, y + 38), it, font=F("semi", 44), fill=(255, 255, 255, int(255 * a)), anchor="ls")
-    return finish(img)
+        y = 200 + i * 84
+        d.line((40, y, w - 40, y), fill=rgba(th["line"], a), width=1)
+        bx, by = 40, y + 24
+        d.rectangle((bx, by, bx + 36, by + 36), outline=rgba(th["fg"], a), width=2)
+        ck = power3_out(anim(t, t0 + i * step + 0.25, 0.4))
+        if ck > 0:
+            pts = [(bx + 8, by + 19), (bx + 15, by + 27), (bx + 29, by + 10)]
+            d.line(pts if ck > 0.5 else pts[:2], fill=rgba(th["fg"], a), width=4)
+        d.text((100 - (1 - a) * 20, y + 56), it, font=F("med", 40), fill=rgba(th["fg"], a), anchor="ls")
+    return img
 
 
-RENDERERS = {
-    "meter": card_meter,
-    "bars": card_bars,
-    "people": card_people,
-    "finance": card_finance,
-    "chat": card_chat,
-    "notes": card_notes,
-}
+RENDERERS = {"meter": card_meter, "bars": card_bars, "people": card_people,
+             "finance": card_finance, "chat": card_chat, "notes": card_notes}
+
+HEIGHTS = {"meter": lambda c: 430, "people": lambda c: 450, "finance": lambda c: 440,
+           "chat": lambda c: 470, "bars": lambda c: 120 + 150 * len(c["rows"]),
+           "notes": lambda c: 200 + 84 * len(c["items"])}
 
 
-def render_card(cfg, t, ctx, width=900):
-    return RENDERERS[cfg["type"]](cfg, t, ctx, width)
+def render_card(cfg, t, ctx, width, th):
+    return RENDERERS[cfg["type"]](cfg, t, ctx, width, th)

@@ -18,7 +18,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 import cards
-from cards import F, hex2rgb, clamp, lerp, ease_out, ease_out_back, ease_in_out
+from cards import F, clamp, lerp, INK, PAPER
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SR = 44100
@@ -56,7 +56,7 @@ def build_timeline(cfg):
     tcfg = v["text"]
     scenes, t = [], 0.0
     for s in cfg["scenes"]:
-        words = parse_markup(s["text"])
+        words = parse_markup(s["text"].upper() if v.get("caps", True) else s["text"])
         wt = [i * step for i in range(len(words))]
         remark_t = wt[-1] + step if s.get("remark") else None
         last = remark_t if remark_t is not None else wt[-1]
@@ -65,8 +65,7 @@ def build_timeline(cfg):
         layout = layout_text(words, s, size, tcfg, v)
         scenes.append(dict(cfg=s, start=t, end=t + dur, dur=dur, words=words, word_times=wt,
                            remark_t=remark_t, layout=layout, size=size, beat=beat,
-                           accent=hex2rgb(s.get("accent", "#ffffff")),
-                           bg=(hex2rgb(s["bg"][0]), hex2rgb(s["bg"][1]))))
+                           th=cards.theme(s.get("theme", "dark"))))
         t += dur
     return scenes
 
@@ -226,110 +225,103 @@ def wave_bars(audio, nframes, fps, nb=40):
 def init_static(cfg):
     v = cfg["video"]
     W, H = v["width"], v["height"]
-    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-    d = np.sqrt(((xx - W / 2) / (W * 0.62)) ** 2 + ((yy - H * 0.45) / (H * 0.62)) ** 2)
-    vign = 1 - 0.55 * np.clip(d - 0.45, 0, 1) ** 1.6
     rng = np.random.default_rng(3)
-    grain = [rng.normal(0, 5.5, (H, W)).astype(np.float32)[..., None] for _ in range(6)]
-    return vign[..., None], grain
+    k = v.get("grain", 0.12)
+    grain = [rng.normal(0, 255 * k * 0.35, (H, W)).astype(np.float32)[..., None] for _ in range(6)]
+    return None, grain
 
 
-def background(t, fi):
+def dark_amount(t):
+    """Transitions fade through ink (DESIGN.md 8)."""
+    half = CFG["video"].get("transition", 0.4) / 2
+    m = 0.0
+    for s in TL[1:]:
+        m = max(m, 1 - abs(t - s["start"]) / half)
+    return clamp(m)
+
+
+def background(s, fi):
     v = CFG["video"]
-    W, H = v["width"], v["height"]
-    half = v.get("transition", 0.4) / 2
-    i = scene_at(t)
-    c0, c1 = map(np.array, TL[i]["bg"])
-    # blend with neighbour near boundaries
-    if i + 1 < len(TL) and t > TL[i]["end"] - half:
-        m = ease_in_out((t - (TL[i]["end"] - half)) / (2 * half))
-        n0, n1 = map(np.array, TL[i + 1]["bg"])
-        c0, c1 = c0 + (n0 - c0) * m, c1 + (n1 - c1) * m
-    elif i > 0 and t < TL[i]["start"] + half:
-        m = ease_in_out((t - (TL[i]["start"] - half)) / (2 * half))
-        p0, p1 = map(np.array, TL[i - 1]["bg"])
-        c0, c1 = p0 + (c0 - p0) * m, p1 + (c1 - p1) * m
-    g = np.linspace(0, 1, H, dtype=np.float32) ** 1.3
-    col = (c0[None, :] + (c1 - c0)[None, :] * g[:, None]).astype(np.float32)[:, None, :]
-    img = col * VIGN + GRAIN[fi % len(GRAIN)]
+    col = np.array(s["th"]["bg"], np.float32)[None, None, :]
+    img = col + GRAIN[fi % len(GRAIN)]
     return Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), "RGB")
 
 
-def with_alpha(im, k):
-    if k >= 0.999:
-        return im
-    im = im.copy()
-    im.putalpha(im.getchannel("A").point(lambda a: int(a * k)))
-    return im
-
-
-def draw_card(frame, s, lt, fade):
+def draw_card(frame, s, lt):
     c = s["cfg"].get("card")
     if not c:
         return
     v = CFG["video"]
     cw = v["card"]["width"]
-    ctx = dict(word_times=s["word_times"], accent=s["accent"], beat=s["beat"])
-    card = cards.render_card(c, lt, ctx, cw)
-    pad = 70
-    sh = cards.shadow(card.width, card.height, pad)
-    comp = Image.new("RGBA", sh.size, (0, 0, 0, 0))
-    comp.putalpha(sh)
-    comp.alpha_composite(card, (pad, pad))
-    e = clamp(lt / 0.35)
-    breath = 1.0075 - 0.0075 * math.cos(2 * math.pi * lt / (s["beat"] * 4))
-    scale = breath
-    comp = comp.resize((int(comp.width * scale), int(comp.height * scale)), Image.BICUBIC)
-    comp = comp.rotate(s["cfg"].get("tilt", 0), resample=Image.BICUBIC, expand=True)
-    dy = (1 - ease_out_back(e)) * 900
-    comp = with_alpha(comp, min(1.0, e * 2.5) * fade)
-    x = (v["width"] - comp.width) // 2
-    y = int(v["card"]["center_y"] - comp.height / 2 + dy)
-    frame.paste(comp, (x, y), comp)
+    ctx = dict(word_times=s["word_times"], beat=s["beat"])
+    card = cards.render_card(c, lt, ctx, cw, s["th"])
+    e = cards.expo_out(lt / 0.9)
+    zoom = 1.0 + 0.02 * clamp(lt / s["dur"])  # slow zoom 1.00 -> 1.02
+    card = card.resize((int(card.width * zoom), int(card.height * zoom)), Image.BICUBIC)
+    a = clamp(lt / 0.6)
+    if a < 1:
+        card.putalpha(card.getchannel("A").point(lambda x: int(x * a)))
+    x = (v["width"] - card.width) // 2
+    y = int(v["card"]["center_y"] - card.height / 2 + (1 - e) * 40)
+    frame.paste(card, (x, y), card)
 
 
-def draw_text(frame, s, lt, fade):
+def draw_text(frame, s, lt):
+    th = s["th"]
     d = ImageDraw.Draw(frame, "RGBA")
     font = F("bold", s["size"])
-    space = font.getlength(" ")
     for wi, w in enumerate(s["words"]):
-        p = clamp((lt - s["word_times"][wi]) / 0.12)
+        p = clamp((lt - s["word_times"][wi]) / 0.6)
         if p <= 0:
             continue
         x, base = s["layout"]["pos"][wi]
-        y = base + (1 - ease_out(p)) * 12
-        a = int(255 * p * fade)
+        y = base + (1 - cards.expo_out(p)) * 24
+        a = int(255 * clamp(p * 2))
         for seg, acc in w:
-            col = s["accent"] if acc else (255, 255, 255)
+            col = th["fg"] if (acc or s["cfg"].get("center")) else th["soft"]
             d.text((x, y), seg, font=font, fill=col + (a,), anchor="ls")
             x += font.getlength(seg)
     if s["remark_t"] is not None:
-        p = clamp((lt - s["remark_t"]) / 0.15)
+        p = clamp((lt - s["remark_t"]) / 0.6)
         if p > 0:
             x, b = s["layout"]["remark"]
-            d.text((x, b + (1 - ease_out(p)) * 8), s["cfg"]["remark"], font=F("reg", 34),
-                   fill=(175, 175, 185, int(255 * p * fade)), anchor="ls")
+            d.text((x, b + (1 - cards.expo_out(p)) * 20), s["cfg"]["remark"], font=F("reg", 34),
+                   fill=th["small"] + (int(255 * p),), anchor="ls")
 
 
-def draw_bottom(frame, s, fi):
+def draw_chrome(frame, s, fi):
+    """Header (rubric + wordmark), footer (line + tags), SV mark, waveform."""
     v = CFG["video"]
+    th = s["th"]
     d = ImageDraw.Draw(frame, "RGBA")
-    # avatar
-    cx, cy, r = 70 + 60, 1690, 60
-    acc = s["accent"]
-    d.ellipse((cx - r - 5, cy - r - 5, cx + r + 5, cy + r + 5), fill=(255, 255, 255, 230))
-    d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=tuple(int(c * 0.55) for c in acc) + (255,))
-    d.text((cx, cy + 2), v.get("avatar_initials", "I.P."), font=F("xbold", 40), fill=(255, 255, 255), anchor="mm")
-    # waveform: 40 bars, bottom aligned
+    W, m = v["width"], v.get("margin", 84)
+    cards.label(d, m, 128, v.get("rubric", "04 / Мысль"), th)
+    cards.tracked(d, W - m, 130, v.get("wordmark", "SOVAKAV"), F("mark", 30), th["fg"], 0.04, "right")
+    d.line((m, 156, W - m, 156), fill=th["line"], width=1)
+    # footer
+    d.line((m, 1590, W - m, 1590), fill=th["line"], width=1)
+    f = F("med", 20)
+    x = m
+    for i, tag in enumerate(v.get("tags", [])):
+        if i:
+            cards.diamond(d, x + 14, 1631, 10, th["small"])
+            x += 28 + 6
+        x += cards.tracked(d, x, 1638, tag.upper(), f, th["small"], 0.35) + 14
+    # SV mark (avatar): paper letters on ink, inverted on light scenes
+    cx, cy, r = m + 52, 1730, 52
+    ring = th["fg"]
+    d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=INK, outline=th["line"] if th["name"] == "dark" else None)
+    cards.tracked(d, cx + 1, cy + 11, "SV", F("mark", 30), PAPER, 0.04, "center")
+    # waveform
     vals = WAVE[min(fi, len(WAVE) - 1)]
     n = len(vals)
-    x0, x1, base, hmax = 560, 1010, 1750, 150
-    bw = 7
+    x0, x1, base, hmax = 560, W - m, 1770, 110
+    bw = 4
     gap = (x1 - x0 - bw * n) / (n - 1)
     for k, val in enumerate(vals):
-        h = max(6, val * hmax)
-        x = x0 + k * (bw + gap)
-        d.rounded_rectangle((x, base - h, x + bw, base), 3, fill=(255, 255, 255, 215))
+        h = max(3, val * hmax)
+        xx = x0 + k * (bw + gap)
+        d.rectangle((xx, base - h, xx + bw, base), fill=th["fg"] + (200,))
 
 
 def draw_cta(frame, s, lt):
@@ -337,36 +329,38 @@ def draw_cta(frame, s, lt):
     if not cta:
         return
     t0 = s["dur"] - cta.get("last", 2.0)
-    p = clamp((lt - t0) / 0.3)
+    p = clamp((lt - t0) / 0.8)
     if p <= 0:
         return
+    th = s["th"]
     d = ImageDraw.Draw(frame, "RGBA")
-    a = int(255 * p)
-    yel = s["accent"]
-    d.text((70, 1395 + (1 - ease_out(p)) * 20), cta["text"], font=F("xbold", 64), fill=(255, 255, 255, a), anchor="ls")
-    bob = 16 * math.sin((lt - t0) * 2 * math.pi * 1.5)
-    ox, oy = 700 + bob * 0.7, 1420 + bob * 0.7
-    L = 190 * ease_out_back(p)
-    ex, ey = ox + L * 0.7, oy + L * 0.7
-    d.line((ox, oy, ex, ey), fill=yel + (a,), width=22)
-    for ang in (math.radians(180 + 45 - 40), math.radians(180 + 45 + 40)):
-        hx, hy = ex + math.cos(ang) * 70, ey + math.sin(ang) * 70
-        d.line((ex, ey, hx, hy), fill=yel + (a,), width=22)
-    d.ellipse((ex - 11, ey - 11, ex + 11, ey + 11), fill=yel + (a,))
+    e = cards.expo_out(p)
+    a = int(255 * clamp(p * 2))
+    m = CFG["video"].get("margin", 84)
+    d.text((m, 1450 + (1 - e) * 30), cta["text"].upper(), font=F("bold", 56), fill=th["fg"] + (a,), anchor="ls")
+    drift = 8 * math.sin((lt - t0) * 2 * math.pi * 0.6)
+    ox, oy = 760 + drift, 1390 + drift
+    L = 150 * e
+    ex, ey = ox + L * 0.707, oy + L * 0.707
+    col = th["fg"] + (a,)
+    d.line((ox, oy, ex, ey), fill=col, width=5)
+    d.line((ex, ey, ex - 46, ey), fill=col, width=5)
+    d.line((ex, ey, ex, ey - 46), fill=col, width=5)
 
 
 def render_frame(fi):
     fps = CFG["video"]["fps"]
     t = fi / fps
-    i = scene_at(t)
-    s = TL[i]
+    s = TL[scene_at(t)]
     lt = t - s["start"]
-    fade = clamp((s["end"] - t) / 0.15) if i + 1 < len(TL) else 1.0
-    frame = background(t, fi)
-    draw_card(frame, s, lt, fade)
-    draw_text(frame, s, lt, fade)
+    frame = background(s, fi)
+    draw_card(frame, s, lt)
+    draw_text(frame, s, lt)
     draw_cta(frame, s, lt)
-    draw_bottom(frame, s, fi)
+    draw_chrome(frame, s, fi)
+    k = dark_amount(t)
+    if k > 0:
+        frame = Image.blend(frame, Image.new("RGB", frame.size, INK), k)
     return frame
 
 
@@ -383,9 +377,8 @@ def qa_layout():
         if not c:
             continue
         # approx card top incl. tilt
-        h = {"meter": 440, "people": 460, "finance": 470, "chat": 490,
-             "bars": 130 + 150 * len(c.get("rows", [])), "notes": 210 + 82 * len(c.get("items", []))}[c["type"]]
-        top = v["card"]["center_y"] - h / 2 - v["card"]["width"] / 2 * math.sin(math.radians(abs(s["cfg"].get("tilt", 0)))) - 8
+        h = cards.HEIGHTS[c["type"]](c) * 1.02
+        top = v["card"]["center_y"] - h / 2
         if s["layout"]["bottom"] > top:
             print(f"!! scene {s['cfg']['id']}: text bottom {s['layout']['bottom']:.0f} overlaps card top {top:.0f}")
             ok = False
@@ -444,7 +437,7 @@ def main():
     write_wav(wav, audio)
     cmd = ["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
            "-s", f"{v['width']}x{v['height']}", "-r", str(fps), "-i", "-", "-i", wav,
-           "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p",
+           "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-maxrate", "10M", "-bufsize", "20M", "-pix_fmt", "yuv420p",
            "-profile:v", "high", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
            "-shortest", out]
     ff = subprocess.Popen(cmd, stdin=subprocess.PIPE)

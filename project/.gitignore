@@ -1,0 +1,4 @@
+input/photos/
+input/track.*
+out/
+__pycache__/
