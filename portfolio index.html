@@ -555,11 +555,6 @@ footer p {
   .skills-grid { grid-template-columns: 1fr; }
   .hero-name { font-size: 52px; }
 }
-  .hero-typed { font-family: monospace; font-size: 1.05rem; opacity: .85; margin: .4rem 0 1rem; min-height: 1.4em; }
-  .hero-typed #typed { color: currentColor; font-weight: 600; }
-  .caret { display: inline-block; width: .55ch; height: 1.1em; margin-left: 2px; vertical-align: -0.15em; background: currentColor; animation: blink 1s steps(1) infinite; }
-  @keyframes blink { 50% { opacity: 0; } }
-  @media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
 </style>
 </head>
 <body>
@@ -580,7 +575,6 @@ footer p {
   <div>
     <p class="hero-eyebrow">Frontend &amp; Shopify Developer · Copenhagen</p>
     <h1 class="hero-name">Igor<br><em>Pshenychnyi</em></h1>
-    <p class="hero-typed" aria-label="React · Next.js · Shopify developer">I build with <span id="typed"></span><span class="caret" aria-hidden="true"></span></p>
     <p class="hero-desc">
       I build clean, fast websites for real clients — from first brief to deployed, 
       live product. Specialising in React, Next.js, and Shopify. Available for remote 
@@ -828,24 +822,6 @@ footer p {
   }, { threshold: 0.12 });
 
   document.querySelectorAll('.reveal').forEach(el => io.observe(el));
-
-  // Typewriter for the hero line
-  (function () {
-    const el = document.getElementById('typed');
-    if (!el) return;
-    const words = ['React.', 'Next.js.', 'Shopify.', 'clean code.'];
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { el.textContent = words[0]; return; }
-    let w = 0, i = 0, deleting = false;
-    (function tick() {
-      const word = words[w];
-      i += deleting ? -1 : 1;
-      el.textContent = word.slice(0, i);
-      let delay = deleting ? 45 : 90;
-      if (!deleting && i === word.length) { deleting = true; delay = 1400; }
-      else if (deleting && i === 0) { deleting = false; w = (w + 1) % words.length; delay = 300; }
-      setTimeout(tick, delay);
-    })();
-  })();
 </script>
 
 </body>
